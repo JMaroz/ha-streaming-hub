@@ -8,14 +8,11 @@ init: false
 arch:
   - aarch64
   - amd64
-  - armv7
 homeassistant_api: true
 ingress: true
-ingress_port: 8099
 host_network: true
 panel_icon: "mdi:movie-open-play"
 panel_title: "Streaming Hub"
-stage: "stable"
 options:
   log_level: "info"
   custom_sources: []
