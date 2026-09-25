@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Streaming Hub</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Bundled local HLS.js with CDN fallback -->
+  <script src="js/hls.min.js"></script>
+  <script>window.Hls || document.write('<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.8/dist/hls.min.js"><\/script>')</script>
+</head>
+<body>
+  <div id="app">
+    <!-- Navbar -->
+    <header class="navbar">
+      <div class="nav-container">
+        <div class="brand" id="brand-logo">
+          <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="2" width="20" height="20" rx="4" />
+            <polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none" />
+            <line x1="2" y1="7" x2="22" y2="7" />
+          </svg>
+          <span class="brand-title">Streaming<strong>Hub</strong></span>
+        </div>
+
+        <nav class="nav-links">
+          <button class="nav-tab active" data-type="all">Tutti</button>
+          <button class="nav-tab" data-type="movie">Film</button>
+          <button class="nav-tab" data-type="tv">Serie TV</button>
+          <button class="nav-tab" id="btn-genres-toggle">Generi ▾</button>
+        </nav>
+
+        <div class="nav-search">
+          <div class="search-box">
+            <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"/>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            <input type="text" id="search-input" placeholder="Cerca film o serie TV..." autocomplete="off">
+            <button id="search-clear" class="btn-clear hidden">✕</button>
+          </div>
+        </div>
+
+        <div class="nav-actions">
+          <button id="btn-settings-toggle" class="btn-settings" title="Gestione Sorgenti & Impostazioni">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+            <span>Sorgenti</span>
+          </button>
+          <div id="ha-badge" class="ha-badge" title="Stato connessione Home Assistant">
+            <span class="pulse-dot"></span>
+            <span id="ha-badge-text">HA Connesso</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Genres Dropdown Bar -->
+      <div id="genres-bar" class="genres-bar hidden">
+        <div class="genres-container" id="genres-list">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Hero Banner -->
+      <section id="hero-section" class="hero-section hidden">
+        <div class="hero-backdrop" id="hero-backdrop"></div>
+        <div class="hero-overlay"></div>
+        <div class="hero-content">
+          <div class="hero-badges">
+            <span id="hero-type" class="badge badge-type">Film</span>
+            <span id="hero-rating" class="badge badge-rating">★ 8.2</span>
+            <span id="hero-year" class="badge badge-year">2026</span>
+          </div>
+          <h1 id="hero-title" class="hero-title">Caricamento...</h1>
+          <p id="hero-description" class="hero-description"></p>
+          <div class="hero-actions">
+            <button id="hero-play-btn" class="btn btn-primary">
+              <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Guarda Ora
+            </button>
+            <button id="hero-info-btn" class="btn btn-secondary">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              Dettagli
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Catalog Section -->
+      <section class="catalog-section">
+        <div class="section-header">
+          <div class="header-left">
+            <h2 id="section-title" class="section-title">Ultimi Arrivi</h2>
+            <div class="sources-filter-bar">
+              <span class="filter-label">Sorgenti:</span>
+              <div id="sources-chips" class="sources-chips"></div>
+            </div>
+          </div>
+          <span id="section-count" class="section-count"></span>
+        </div>
+
+        <!-- Grid Cards -->
+        <div id="catalog-grid" class="catalog-grid">
+          <!-- Populated dynamically -->
+        </div>
+
+        <!-- Loading State -->
+        <div id="loading-spinner" class="loading-state">
+          <div class="spinner"></div>
+          <p>Caricamento contenuti in corso...</p>
+        </div>
+
+        <!-- Empty State -->
+        <div id="empty-state" class="empty-state hidden">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <h3>Nessun titolo trovato</h3>
+          <p>Prova a modificare i termini di ricerca o a selezionare un'altra categoria.</p>
+        </div>
+
+        <!-- Onboarding State (No sources configured) -->
+        <div id="onboarding-state" class="empty-state onboarding-card hidden">
+          <div class="onboarding-icon">📡</div>
+          <h3>Nessuna sorgente configurata</h3>
+          <p>Streaming Hub è un motore neutrale che non include link o sorgenti predefinite.<br>Aggiungi gli indirizzi web delle tue sorgenti nelle impostazioni dell'Add-on in Home Assistant per iniziare a sfogliare i contenuti.</p>
+          <div class="onboarding-actions">
+            <button id="btn-open-settings" class="btn btn-primary">Gestione Sorgenti & Rilevamento</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Details Modal -->
+    <div id="details-modal" class="modal hidden">
+      <div class="modal-backdrop" id="modal-backdrop-close"></div>
+      <div class="modal-dialog">
+        <button id="modal-close" class="modal-close-btn" aria-label="Chiudi">✕</button>
+        
+        <div class="modal-hero">
+          <div id="modal-backdrop-img" class="modal-backdrop-img"></div>
+          <div class="modal-hero-gradient"></div>
+          <div class="modal-hero-info">
+            <div class="modal-poster-wrap">
+              <img id="modal-poster" src="" alt="Locandina" class="modal-poster">
+            </div>
+            <div class="modal-hero-text">
+              <h2 id="modal-title" class="modal-title"></h2>
+              <div class="modal-meta-row">
+                <span id="modal-year" class="badge badge-year"></span>
+                <span id="modal-duration" class="badge badge-duration"></span>
+                <span id="modal-rating" class="badge badge-rating"></span>
+                <span id="modal-type-badge" class="badge badge-type"></span>
+              </div>
+              <div id="modal-genres" class="modal-genres"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-body">
+          <div class="modal-synopsis">
+            <h3>Trama</h3>
+            <p id="modal-plot">Nessuna sinossi disponibile.</p>
+          </div>
+
+          <div id="modal-cast-section" class="modal-cast hidden">
+            <h4>Cast e Regia</h4>
+            <p id="modal-cast-text"></p>
+          </div>
+
+          <!-- TV Series Seasons / Episodes Section -->
+          <div id="tv-series-section" class="tv-section hidden">
+            <div class="tv-section-header">
+              <h3>Episodi</h3>
+              <div id="seasons-tabs" class="seasons-tabs"></div>
+            </div>
+            <div id="episodes-list" class="episodes-list"></div>
+          </div>
+
+          <!-- Playback and Cast Control Panel -->
+          <div class="playback-panel">
+            <div class="panel-section">
+              <label for="device-select">Dispositivo di Riproduzione:</label>
+              <div class="select-wrapper">
+                <select id="device-select">
+                  <option value="browser">💻 Browser Locale (Web Player)</option>
+                  <!-- Populated dynamically with HA media players -->
+                </select>
+              </div>
+            </div>
+
+            <div class="panel-section" id="sources-section">
+              <label for="source-select">Sorgente Video:</label>
+              <div class="select-wrapper">
+                <select id="source-select">
+                  <!-- Populated dynamically -->
+                </select>
+              </div>
+            </div>
+
+            <button id="btn-play-trigger" class="btn btn-primary btn-large">
+              <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              <span id="btn-play-text">Avvia Riproduzione</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Video Player Overlay -->
+    <div id="player-modal" class="player-overlay hidden">
+      <div class="player-header">
+        <button id="player-close-btn" class="btn-player-back">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="19" y1="12" x2="5" y2="12"></line>
+            <polyline points="12 19 5 12 12 5"></polyline>
+          </svg>
+          <span>Torna al catalogo</span>
+        </button>
+        <span id="player-title" class="player-title"></span>
+      </div>
+
+      <div class="video-container">
+        <video id="video-element" controls playsinline></video>
+        <div id="player-spinner" class="player-spinner hidden">
+          <div class="spinner"></div>
+          <p>Buffering flusso HLS...</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings & Sources Modal -->
+    <div id="settings-modal" class="modal hidden">
+      <div class="modal-backdrop" id="settings-backdrop-close"></div>
+      <div class="modal-dialog modal-dialog-sm">
+        <button id="settings-close" class="modal-close-btn" aria-label="Chiudi">✕</button>
+        <div class="settings-content">
+          <h2>⚙️ Gestione Sorgenti & Rilevamento</h2>
+          <p class="settings-subtitle">Streaming Hub supporta l'auto-rilevamento intelligente: analizza l'HTML del mirror inserito per determinare il motore compatibile.</p>
+          
+          <div class="settings-section">
+            <h3 class="settings-section-title">Sorgenti Attive nel Sistema</h3>
+            <div id="settings-active-sources" class="active-sources-list">
+              <!-- Populated dynamically -->
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <h3 class="settings-section-title">Testa URL & Auto-Discriminazione</h3>
+            <p class="settings-desc-sm">Verifica se un URL o mirror viene riconosciuto correttamente prima di aggiungerlo alla configurazione di Home Assistant:</p>
+            <div class="test-source-box">
+              <input type="url" id="test-source-url" placeholder="https://tuo-indirizzo-sorgente..." class="form-input">
+              <select id="test-source-type" class="form-select">
+                <option value="auto">Auto-Rileva Tipo</option>
+                <option value="streamingcommunity">StreamingCommunity</option>
+                <option value="cb01">CB01</option>
+              </select>
+              <button id="btn-test-source" class="btn btn-secondary">Analizza & Testa</button>
+            </div>
+            <div id="test-source-result" class="test-result-box hidden"></div>
+          </div>
+
+          <div class="settings-hint">
+            <strong>💡 Configurazione permanente in Home Assistant:</strong>
+            <p>Per salvare le tue sorgenti, vai su <code>Impostazioni &gt; Componenti aggiuntivi &gt; Streaming Hub &gt; Configurazione</code> e inserisci gli URL nell'array <code>custom_sources</code>.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="toast-container"></div>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+---
+configuration:
+  log_level:
+    name: "Livello di Log"
+    description: "Controlla il livello di dettaglio dei log dell'applicazione."
+  custom_sources:
+    name: "Sorgenti di Streaming Personalizzate"
+    description: "Elenco degli indirizzi web (URL) delle tue sorgenti. Il tipo (StreamingCommunity o CB01) può essere impostato su auto per essere rilevato automaticamente."
+  custom_dns:
+    name: "Modalità DNS-over-HTTPS"
+    description: "Metodo di risoluzione DNS per superare blocchi ISP locali (Cloudflare, Google, Quad9 o sistema)."
+  tmdb_api_key:
+    name: "Chiave API TMDb"
+    description: "Chiave opzionale di The Movie Database per locandine in alta definizione, sfondi e trame."
+  stream_port:
+    name: "Porta Proxy Streaming"
+    description: "Porta HTTP utilizzata per servire i flussi video HLS ai dispositivi nella rete locale."

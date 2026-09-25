@@ -1,0 +1,17 @@
+---
+configuration:
+  log_level:
+    name: "Log Level"
+    description: "Controls the verbosity of the add-on logs."
+  custom_sources:
+    name: "Custom Streaming Sources"
+    description: "List of base website URLs for your sources. Type (StreamingCommunity or CB01) can be set to auto for automatic fingerprinting."
+  custom_dns:
+    name: "DNS-over-HTTPS Mode"
+    description: "DNS resolution method to bypass local ISP censorship (Cloudflare, Google, Quad9, or system)."
+  tmdb_api_key:
+    name: "TMDb API Key"
+    description: "Optional The Movie Database API key for high-resolution posters, backdrops, and plots."
+  stream_port:
+    name: "Stream Proxy Port"
+    description: "HTTP port used to serve proxied HLS video streams on the local network."

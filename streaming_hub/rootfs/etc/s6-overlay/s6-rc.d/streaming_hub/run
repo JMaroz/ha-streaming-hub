@@ -1,0 +1,23 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+# ==============================================================================
+# Home Assistant App: Streaming Hub
+# Starts the Streaming Hub backend application
+# ==============================================================================
+
+bashio::log.info "Avvio di Streaming Hub..."
+
+# Leggi opzioni di configurazione da Supervisor
+export LOG_LEVEL="$(bashio::config 'log_level' 'info')"
+export CUSTOM_DNS="$(bashio::config 'custom_dns' 'cloudflare')"
+export TMDB_API_KEY="$(bashio::config 'tmdb_api_key' '')"
+export STREAM_PORT="$(bashio::config 'stream_port' '8099')"
+
+bashio::log.info "Configurazione caricata:"
+bashio::log.info " - DNS: ${CUSTOM_DNS}"
+bashio::log.info " - Porta streaming: ${STREAM_PORT}"
+
+cd /app || bashio::exit.nok "Impossibile accedere alla cartella /app"
+
+bashio::log.info "Avvio del server Python Uvicorn/FastAPI sulla porta ${STREAM_PORT}..."
+exec python3 -m backend.main

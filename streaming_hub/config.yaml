@@ -1,0 +1,33 @@
+---
+name: "Streaming Hub"
+slug: "streaming_hub"
+description: "Hub multimediale per film e serie TV con streaming HLS, Ingress UI e supporto Cast"
+url: "https://github.com/JMaroz/ha-streaming-hub"
+version: "1.0.0"
+init: false
+arch:
+  - aarch64
+  - amd64
+  - armv7
+homeassistant_api: true
+ingress: true
+ingress_port: 8099
+host_network: true
+panel_icon: "mdi:movie-open-play"
+panel_title: "Streaming Hub"
+stage: "stable"
+options:
+  log_level: "info"
+  custom_sources: []
+  custom_dns: "cloudflare"
+  tmdb_api_key: ""
+  stream_port: 8099
+schema:
+  log_level: "list(trace|debug|info|notice|warning|error|fatal)"
+  custom_sources:
+    - url: "url"
+      type: "list(auto|streamingcommunity|cb01)?"
+      name: "str?"
+  custom_dns: "list(cloudflare|google|quad9|system)"
+  tmdb_api_key: "str?"
+  stream_port: "port"

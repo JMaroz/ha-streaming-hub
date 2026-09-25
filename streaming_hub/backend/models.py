@@ -1,0 +1,305 @@
+"""Internal data models for Streaming Hub."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any
+
+
+@dataclass
+class ProviderSource:
+    """A streaming or media source available for a movie or episode."""
+
+    id: str
+    media_id: str
+
+    provider_id: str
+    provider_name: str
+
+    page_url: str
+
+    language: str | None = "ita"
+    quality: str | None = None  # e.g., "HD", "SD", "FHD", "4K"
+
+    available: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "id": self.id,
+            "media_id": self.media_id,
+            "provider_id": self.provider_id,
+            "provider_name": self.provider_name,
+            "page_url": self.page_url,
+            "language": self.language,
+            "quality": self.quality,
+            "available": self.available,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ProviderSource:
+        """Reconstruct from dictionary."""
+        return cls(
+            id=data["id"],
+            media_id=data["media_id"],
+            provider_id=data["provider_id"],
+            provider_name=data["provider_name"],
+            page_url=data["page_url"],
+            language=data.get("language"),
+            quality=data.get("quality"),
+            available=data.get("available", True),
+        )
+
+
+@dataclass
+class Movie:
+    """A movie entry in the catalog."""
+
+    id: str
+    title: str
+    original_title: str | None = None
+    year: int | None = None
+    poster_url: str | None = None
+    backdrop_url: str | None = None
+    description: str | None = None
+    genres: list[str] = field(default_factory=list)
+    duration: int | None = None  # in minutes
+    rating: float | None = None
+
+    cast: list[str] = field(default_factory=list)
+    director: str | None = None
+
+    cb01_url: str = ""
+    streamingcommunity_url: str = ""
+    tmdb_id: int | None = None
+    imdb_id: str | None = None
+    catalogs: list[str] = field(default_factory=list)
+
+    sources: list[ProviderSource] = field(default_factory=list)
+
+    added_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "id": self.id,
+            "type": "movie",
+            "title": self.title,
+            "original_title": self.original_title,
+            "year": self.year,
+            "poster_url": self.poster_url,
+            "backdrop_url": self.backdrop_url,
+            "description": self.description,
+            "genres": self.genres,
+            "duration": self.duration,
+            "rating": self.rating,
+            "cast": self.cast,
+            "director": self.director,
+            "cb01_url": self.cb01_url,
+            "streamingcommunity_url": self.streamingcommunity_url,
+            "tmdb_id": self.tmdb_id,
+            "imdb_id": self.imdb_id,
+            "catalogs": self.catalogs,
+            "sources": [s.to_dict() for s in self.sources],
+            "added_at": self.added_at.isoformat() if self.added_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Movie:
+        """Reconstruct from dictionary."""
+        sources = [ProviderSource.from_dict(s) for s in data.get("sources", [])]
+        added_at = datetime.fromisoformat(data["added_at"]) if data.get("added_at") else None
+        updated_at = datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else None
+        return cls(
+            id=data["id"],
+            title=data["title"],
+            original_title=data.get("original_title"),
+            year=data.get("year"),
+            poster_url=data.get("poster_url"),
+            backdrop_url=data.get("backdrop_url"),
+            description=data.get("description"),
+            genres=data.get("genres", []),
+            duration=data.get("duration"),
+            rating=data.get("rating"),
+            cast=data.get("cast", []),
+            director=data.get("director"),
+            cb01_url=data.get("cb01_url", ""),
+            streamingcommunity_url=data.get("streamingcommunity_url", ""),
+            tmdb_id=data.get("tmdb_id"),
+            imdb_id=data.get("imdb_id"),
+            catalogs=data.get("catalogs", []),
+            sources=sources,
+            added_at=added_at,
+            updated_at=updated_at,
+        )
+
+
+@dataclass
+class TvEpisode:
+    """An episode in a TV Series."""
+
+    id: str
+    media_id: str
+    season_number: int
+    episode_number: int
+
+    title: str = ""
+    description: str | None = None
+    poster_url: str | None = None
+
+    sources: list[ProviderSource] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "id": self.id,
+            "media_id": self.media_id,
+            "season_number": self.season_number,
+            "episode_number": self.episode_number,
+            "title": self.title,
+            "description": self.description,
+            "poster_url": self.poster_url,
+            "sources": [s.to_dict() for s in self.sources],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TvEpisode:
+        """Reconstruct from dictionary."""
+        return cls(
+            id=data["id"],
+            media_id=data["media_id"],
+            season_number=data["season_number"],
+            episode_number=data["episode_number"],
+            title=data.get("title", ""),
+            description=data.get("description"),
+            poster_url=data.get("poster_url"),
+            sources=[ProviderSource.from_dict(s) for s in data.get("sources", [])],
+        )
+
+
+@dataclass
+class TvSeason:
+    """A season in a TV Series."""
+
+    number: int
+    episodes: list[TvEpisode] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {"number": self.number, "episodes": [e.to_dict() for e in self.episodes]}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TvSeason:
+        """Reconstruct from dictionary."""
+        return cls(number=data["number"], episodes=[TvEpisode.from_dict(e) for e in data.get("episodes", [])])
+
+
+@dataclass
+class TvSeries:
+    """A TV series entry in the catalog."""
+
+    id: str
+    title: str
+    original_title: str | None = None
+    year: int | None = None
+    poster_url: str | None = None
+    backdrop_url: str | None = None
+    description: str | None = None
+    genres: list[str] = field(default_factory=list)
+    rating: float | None = None
+    cast: list[str] = field(default_factory=list)
+    director: str | None = None
+
+    cb01_url: str = ""
+    streamingcommunity_url: str = ""
+    tmdb_id: int | None = None
+    imdb_id: str | None = None
+    catalogs: list[str] = field(default_factory=list)
+
+    seasons: list[TvSeason] = field(default_factory=list)
+
+    added_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "id": self.id,
+            "type": "tv",
+            "title": self.title,
+            "original_title": self.original_title,
+            "year": self.year,
+            "poster_url": self.poster_url,
+            "backdrop_url": self.backdrop_url,
+            "description": self.description,
+            "genres": self.genres,
+            "rating": self.rating,
+            "cast": self.cast,
+            "director": self.director,
+            "cb01_url": self.cb01_url,
+            "streamingcommunity_url": self.streamingcommunity_url,
+            "tmdb_id": self.tmdb_id,
+            "imdb_id": self.imdb_id,
+            "catalogs": self.catalogs,
+            "seasons": [s.to_dict() for s in self.seasons],
+            "added_at": self.added_at.isoformat() if self.added_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TvSeries:
+        """Reconstruct from dictionary."""
+        added_at = datetime.fromisoformat(data["added_at"]) if data.get("added_at") else None
+        updated_at = datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else None
+        return cls(
+            id=data["id"],
+            title=data["title"],
+            original_title=data.get("original_title"),
+            year=data.get("year"),
+            poster_url=data.get("poster_url"),
+            backdrop_url=data.get("backdrop_url"),
+            description=data.get("description"),
+            genres=data.get("genres", []),
+            rating=data.get("rating"),
+            cast=data.get("cast", []),
+            director=data.get("director"),
+            cb01_url=data.get("cb01_url", ""),
+            streamingcommunity_url=data.get("streamingcommunity_url", ""),
+            tmdb_id=data.get("tmdb_id"),
+            imdb_id=data.get("imdb_id"),
+            catalogs=data.get("catalogs", []),
+            seasons=[TvSeason.from_dict(s) for s in data.get("seasons", [])],
+            added_at=added_at,
+            updated_at=updated_at,
+        )
+
+
+@dataclass
+class ResolvedMedia:
+    """A playable media stream resolved from a provider source."""
+
+    url: str
+
+    mime_type: str | None = "application/vnd.apple.mpegurl"
+    stream_format: str | None = "hls"
+
+    title: str = ""
+    poster_url: str | None = None
+    duration: int | None = None
+    provider_id: str = ""
+    expires_at: datetime | None = None
+    headers: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class CastDeviceInfo:
+    """Information about a discovered media player or Cast device."""
+
+    entity_id: str
+    name: str
+    is_cast: bool
+    state: str
+    device_class: str | None = None
