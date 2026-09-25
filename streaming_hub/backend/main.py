@@ -175,7 +175,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Streaming Hub",
     description="Home Assistant App for media streaming, HLS proxying, and Cast control",
-    version="1.2.1",
+    version="1.2.2",
     lifespan=lifespan,
 )
 
@@ -253,7 +253,7 @@ async def get_status(request: Request) -> dict[str, Any]:
     return {
         "status": "online",
         "app_name": "Streaming Hub",
-        "version": "1.2.1",
+        "version": "1.2.2",
         "ingress_path": ingress_path,
         "ha_host_ip": ha_host,
         "stream_port": CONFIG.get("stream_port", 8099),
@@ -539,7 +539,7 @@ async def cast_to_device(req: CastRequest) -> dict[str, Any]:
     lan_stream_url = f"http://{ha_host}:{stream_port}/stream/{token}"
     _LOGGER.info("Sending Cast command to %s with stream: %s", req.entity_id, lan_stream_url)
 
-    success = await ha_client.play_on_device(
+    success, actual_entity = await ha_client.play_on_device(
         entity_id=req.entity_id,
         media_url=lan_stream_url,
         title=req.title,
@@ -555,7 +555,7 @@ async def cast_to_device(req: CastRequest) -> dict[str, Any]:
 
     # Start active tracker to sync watch progress from Home Assistant Cast entity
     ha_client.start_cast_tracker(
-        entity_id=req.entity_id,
+        entity_id=actual_entity,
         media_id=req.media_id or "media",
         title=req.title,
         media_type=req.media_type,
@@ -568,10 +568,29 @@ async def cast_to_device(req: CastRequest) -> dict[str, Any]:
 
     return {
         "success": True,
-        "entity_id": req.entity_id,
+        "entity_id": actual_entity,
         "stream_url": lan_stream_url,
         "token": token,
     }
+
+
+class CastControlRequest(BaseModel):
+    entity_id: str
+    command: str
+    value: float | None = None
+
+
+@app.get("/api/cast/status")
+async def get_cast_status(entity_id: str | None = None) -> dict[str, Any]:
+    """Get active cast playback status and progress."""
+    return await ha_client.get_cast_status(entity_id)
+
+
+@app.post("/api/cast/control")
+async def control_cast(req: CastControlRequest) -> dict[str, Any]:
+    """Control cast playback (play, pause, stop, seek, volume)."""
+    success = await ha_client.control_cast(req.entity_id, req.command, req.value)
+    return {"success": success}
 
 
 # Proxy stream endpoints

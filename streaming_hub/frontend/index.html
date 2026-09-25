@@ -246,6 +246,95 @@
       </div>
     </div>
 
+    <!-- Floating Cast Playback & Control Bar -->
+    <div id="cast-bar" class="cast-bar hidden">
+      <div class="cast-bar-container">
+        <!-- Left: Media Info -->
+        <div class="cast-bar-media">
+          <div class="cast-bar-poster-wrapper">
+            <img id="cast-bar-poster" class="cast-bar-poster" src="" alt="Poster" />
+          </div>
+          <div class="cast-bar-info">
+            <div class="cast-bar-title-row">
+              <span id="cast-bar-title" class="cast-bar-title">Titolo in riproduzione</span>
+              <span id="cast-bar-badge" class="cast-bar-badge hidden">S1:E1</span>
+            </div>
+            <div class="cast-bar-device-row">
+              <svg class="cast-bar-device-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M2 16.1A5 5 0 0 1 5.9 20M2 12.05A9 9 0 0 1 9.95 20M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"></path>
+                <line x1="2" y1="20" x2="2.01" y2="20"></line>
+              </svg>
+              <span id="cast-bar-device" class="cast-bar-device">TV Salotto</span>
+              <span class="cast-bar-dot-sep">•</span>
+              <span id="cast-bar-status-dot" class="cast-bar-status-dot"></span>
+              <span id="cast-bar-status" class="cast-bar-status">In riproduzione</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Center: Playback Controls & Progress Bar -->
+        <div class="cast-bar-center">
+          <div class="cast-bar-controls">
+            <button id="cast-bar-seek-back" class="btn-cast-ctrl" title="Indietro di 10 secondi">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 4v6h6M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+                <text x="12" y="16" font-size="7.5" font-weight="bold" text-anchor="middle" fill="currentColor" stroke="none">10</text>
+              </svg>
+            </button>
+            <button id="cast-bar-play-pause" class="btn-cast-ctrl btn-cast-main" title="Play / Pausa">
+              <svg id="cast-icon-play" class="hidden" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+              </svg>
+              <svg id="cast-icon-pause" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="6" y="4" width="4" height="16"></rect>
+                <rect x="14" y="4" width="4" height="16"></rect>
+              </svg>
+            </button>
+            <button id="cast-bar-seek-forward" class="btn-cast-ctrl" title="Avanti di 30 secondi">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M23 4v6h-6M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                <text x="12" y="16" font-size="7.5" font-weight="bold" text-anchor="middle" fill="currentColor" stroke="none">30</text>
+              </svg>
+            </button>
+          </div>
+
+          <div class="cast-bar-progress-row">
+            <span id="cast-bar-cur-time" class="cast-bar-time">00:00</span>
+            <div class="cast-bar-slider-wrapper">
+              <div id="cast-bar-slider-fill" class="cast-bar-slider-fill" style="width: 0%;"></div>
+              <input type="range" id="cast-bar-slider" class="cast-bar-slider" min="0" max="1000" value="0" step="1" />
+            </div>
+            <span id="cast-bar-total-time" class="cast-bar-time">--:--</span>
+          </div>
+        </div>
+
+        <!-- Right: Volume & Stop / Disconnect -->
+        <div class="cast-bar-actions">
+          <div class="cast-bar-volume">
+            <button id="cast-bar-mute" class="btn-cast-ctrl-sm" title="Muto / Riattiva audio">
+              <svg id="cast-icon-vol" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+              </svg>
+              <svg id="cast-icon-vol-mute" class="hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                <line x1="23" y1="9" x2="17" y2="15"></line>
+                <line x1="17" y1="9" x2="23" y2="15"></line>
+              </svg>
+            </button>
+            <input type="range" id="cast-bar-vol-slider" class="cast-bar-vol-slider" min="0" max="100" value="100" />
+          </div>
+
+          <button id="cast-bar-stop" class="btn-cast-stop" title="Interrompi riproduzione su Cast">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="6" y="6" width="12" height="12" rx="2"></rect>
+            </svg>
+            <span>Stop</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Toast Notifications -->
     <div id="toast-container" class="toast-container"></div>
   </div>

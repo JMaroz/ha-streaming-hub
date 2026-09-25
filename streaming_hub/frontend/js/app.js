@@ -22,6 +22,25 @@
     hls: null,
     ingressPath: "",
     resumeProgress: null,
+    castSession: {
+      active: false,
+      entityId: null,
+      deviceName: null,
+      title: null,
+      posterUrl: "",
+      isTv: false,
+      season: null,
+      episode: null,
+      state: "idle",
+      position: 0,
+      duration: 0,
+      volume: 1,
+      muted: false,
+      isSeeking: false,
+      pollTimer: null,
+      localTimer: null,
+      idleCount: 0,
+    },
   };
 
   // DOM Elements
@@ -82,6 +101,29 @@
     playerSpinner: document.getElementById("player-spinner"),
     toastContainer: document.getElementById("toast-container"),
     onboardingState: document.getElementById("onboarding-state"),
+
+    // Cast Control Bar
+    castBar: document.getElementById("cast-bar"),
+    castBarPoster: document.getElementById("cast-bar-poster"),
+    castBarTitle: document.getElementById("cast-bar-title"),
+    castBarBadge: document.getElementById("cast-bar-badge"),
+    castBarDevice: document.getElementById("cast-bar-device"),
+    castBarStatusDot: document.getElementById("cast-bar-status-dot"),
+    castBarStatus: document.getElementById("cast-bar-status"),
+    castBarSeekBack: document.getElementById("cast-bar-seek-back"),
+    castBarPlayPause: document.getElementById("cast-bar-play-pause"),
+    castIconPlay: document.getElementById("cast-icon-play"),
+    castIconPause: document.getElementById("cast-icon-pause"),
+    castBarSeekForward: document.getElementById("cast-bar-seek-forward"),
+    castBarCurTime: document.getElementById("cast-bar-cur-time"),
+    castBarSlider: document.getElementById("cast-bar-slider"),
+    castBarSliderFill: document.getElementById("cast-bar-slider-fill"),
+    castBarTotalTime: document.getElementById("cast-bar-total-time"),
+    castBarMute: document.getElementById("cast-bar-mute"),
+    castIconVol: document.getElementById("cast-icon-vol"),
+    castIconVolMute: document.getElementById("cast-icon-vol-mute"),
+    castBarVolSlider: document.getElementById("cast-bar-vol-slider"),
+    castBarStop: document.getElementById("cast-bar-stop"),
   };
 
   // Helper: Format base API URL respecting Ingress
@@ -100,6 +142,7 @@
     await loadSources();
     loadContinueWatching();
     loadCatalog();
+    checkActiveCastSession();
   }
 
   // Status Check
@@ -203,6 +246,30 @@
       state.selectedDevice = e.target.value;
       updatePlayButtonText();
     });
+
+    // Cast Control Bar Listeners
+    if (elements.castBarPlayPause) {
+      elements.castBarPlayPause.addEventListener("click", toggleCastPlayPause);
+    }
+    if (elements.castBarSeekBack) {
+      elements.castBarSeekBack.addEventListener("click", () => seekCastRelative(-10));
+    }
+    if (elements.castBarSeekForward) {
+      elements.castBarSeekForward.addEventListener("click", () => seekCastRelative(30));
+    }
+    if (elements.castBarSlider) {
+      elements.castBarSlider.addEventListener("input", handleCastSliderInput);
+      elements.castBarSlider.addEventListener("change", handleCastSliderChange);
+    }
+    if (elements.castBarMute) {
+      elements.castBarMute.addEventListener("click", toggleCastMute);
+    }
+    if (elements.castBarVolSlider) {
+      elements.castBarVolSlider.addEventListener("input", handleCastVolumeChange);
+    }
+    if (elements.castBarStop) {
+      elements.castBarStop.addEventListener("click", stopCastPlayback);
+    }
 
     // Keyboard Esc
     document.addEventListener("keydown", (e) => {
@@ -1017,8 +1084,26 @@
         throw new Error(err.detail || "Casting fallito");
       }
 
-      showToast(`Riproduzione avviata con successo su ${entityId}!`, "success");
+      const data = await resp.json();
+      const actualEntity = data.entity_id || entityId;
+      const dev = state.mediaPlayers.find((p) => p.entity_id === actualEntity);
+      const devName = dev ? dev.name : actualEntity;
+
+      showToast(`Riproduzione avviata con successo su ${devName}!`, "success");
       closeModal();
+
+      // Show persistent Cast Control Bar immediately
+      showCastBar({
+        entityId: actualEntity,
+        deviceName: devName,
+        title: title,
+        posterUrl: state.selectedItem.backdrop_url || state.selectedItem.poster_url,
+        isTv: isTv,
+        season: isTv ? state.selectedSeason : null,
+        episode: (isTv && state.selectedEpisode) ? state.selectedEpisode.episode_number : null,
+        seekSeconds: hasResume ? state.resumeProgress.progress_seconds : 0,
+      });
+
       setTimeout(loadContinueWatching, 3000);
     } catch (err) {
       console.error("Cast error:", err);
@@ -1203,6 +1288,329 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#039;");
+  }
+
+  // ==========================================
+  // Cast Playback Bar & Control Logic
+  // ==========================================
+
+  function showCastBar(initData) {
+    if (!elements.castBar) return;
+
+    state.castSession = {
+      active: true,
+      entityId: initData.entityId,
+      deviceName: initData.deviceName || initData.entityId,
+      title: initData.title || "In riproduzione",
+      posterUrl: initData.posterUrl || "",
+      isTv: !!initData.isTv,
+      season: initData.season,
+      episode: initData.episode,
+      state: "playing",
+      position: initData.seekSeconds || 0,
+      duration: 0,
+      volume: 1,
+      muted: false,
+      isSeeking: false,
+      pollTimer: null,
+      localTimer: null,
+      idleCount: 0,
+    };
+
+    if (elements.castBarTitle) elements.castBarTitle.textContent = state.castSession.title;
+    if (elements.castBarDevice) elements.castBarDevice.textContent = state.castSession.deviceName;
+    if (elements.castBarPoster) {
+      if (state.castSession.posterUrl) {
+        elements.castBarPoster.src = state.castSession.posterUrl;
+        elements.castBarPoster.classList.remove("hidden");
+      } else {
+        elements.castBarPoster.src = "";
+      }
+    }
+
+    if (elements.castBarBadge) {
+      if (state.castSession.isTv && state.castSession.season && state.castSession.episode) {
+        elements.castBarBadge.textContent = `S${state.castSession.season}:E${state.castSession.episode}`;
+        elements.castBarBadge.classList.remove("hidden");
+      } else {
+        elements.castBarBadge.classList.add("hidden");
+      }
+    }
+
+    updateCastStatusUI("playing");
+    renderCastProgressUI();
+
+    elements.castBar.classList.remove("hidden");
+    document.body.classList.add("cast-active");
+
+    startCastPolling(initData.entityId);
+  }
+
+  function hideCastBar() {
+    stopCastPolling();
+    if (elements.castBar) {
+      elements.castBar.classList.add("hidden");
+    }
+    document.body.classList.remove("cast-active");
+    state.castSession.active = false;
+    loadContinueWatching();
+  }
+
+  function updateCastStatusUI(playbackState) {
+    const isPlaying = playbackState === "playing";
+    const isBuffering = playbackState === "buffering";
+
+    if (elements.castIconPlay && elements.castIconPause) {
+      if (isPlaying) {
+        elements.castIconPlay.classList.add("hidden");
+        elements.castIconPause.classList.remove("hidden");
+      } else {
+        elements.castIconPlay.classList.remove("hidden");
+        elements.castIconPause.classList.add("hidden");
+      }
+    }
+
+    if (elements.castBarStatusDot) {
+      elements.castBarStatusDot.className = "cast-bar-status-dot";
+      if (!isPlaying && !isBuffering) {
+        elements.castBarStatusDot.classList.add("paused");
+      } else if (isBuffering) {
+        elements.castBarStatusDot.classList.add("buffering");
+      }
+    }
+
+    if (elements.castBarStatus) {
+      if (isPlaying) {
+        elements.castBarStatus.textContent = "In riproduzione";
+      } else if (isBuffering) {
+        elements.castBarStatus.textContent = "Caricamento...";
+      } else if (playbackState === "paused") {
+        elements.castBarStatus.textContent = "In pausa";
+      } else {
+        elements.castBarStatus.textContent = playbackState;
+      }
+    }
+  }
+
+  function startCastPolling(entityId) {
+    stopCastPolling();
+
+    // Fast local timer every 1s for smooth progress bar progression
+    state.castSession.localTimer = setInterval(() => {
+      if (state.castSession.active && state.castSession.state === "playing" && !state.castSession.isSeeking) {
+        state.castSession.position += 1;
+        if (state.castSession.duration > 0 && state.castSession.position > state.castSession.duration) {
+          state.castSession.position = state.castSession.duration;
+        }
+        renderCastProgressUI();
+      }
+    }, 1000);
+
+    // Initial immediate fetch
+    pollCastStatus(entityId);
+
+    // Periodic HA poll every 3 seconds
+    state.castSession.pollTimer = setInterval(() => {
+      pollCastStatus(entityId);
+    }, 3000);
+  }
+
+  function stopCastPolling() {
+    if (state.castSession.pollTimer) {
+      clearInterval(state.castSession.pollTimer);
+      state.castSession.pollTimer = null;
+    }
+    if (state.castSession.localTimer) {
+      clearInterval(state.castSession.localTimer);
+      state.castSession.localTimer = null;
+    }
+  }
+
+  async function pollCastStatus(entityId) {
+    try {
+      const url = apiUrl(`api/cast/status?entity_id=${encodeURIComponent(entityId)}`);
+      const resp = await fetch(url);
+      if (!resp.ok) return;
+
+      const data = await resp.json();
+      if (!data) return;
+
+      if (!data.active && data.state && ["off", "idle", "standby"].includes(data.state)) {
+        state.castSession.idleCount = (state.castSession.idleCount || 0) + 1;
+        if (state.castSession.idleCount >= 3) {
+          hideCastBar();
+          return;
+        }
+      } else if (data.active) {
+        state.castSession.idleCount = 0;
+      }
+
+      state.castSession.state = data.state || "playing";
+      if (!state.castSession.isSeeking) {
+        state.castSession.position = data.media_position || state.castSession.position;
+      }
+      state.castSession.duration = data.media_duration || state.castSession.duration;
+      state.castSession.volume = data.volume_level !== undefined ? data.volume_level : 1;
+      state.castSession.muted = !!data.is_volume_muted;
+
+      if (data.title && elements.castBarTitle) {
+        elements.castBarTitle.textContent = data.title;
+      }
+      if (data.device_name && elements.castBarDevice) {
+        elements.castBarDevice.textContent = data.device_name;
+      }
+      if (data.poster_url && elements.castBarPoster && !elements.castBarPoster.src) {
+        elements.castBarPoster.src = data.poster_url;
+      }
+
+      updateCastStatusUI(state.castSession.state);
+      renderCastProgressUI();
+      renderCastVolumeUI();
+    } catch (err) {
+      console.debug("Cast poll error:", err);
+    }
+  }
+
+  function renderCastProgressUI() {
+    const curSec = Math.max(0, Math.floor(state.castSession.position || 0));
+    const durSec = Math.max(0, Math.floor(state.castSession.duration || 0));
+
+    if (elements.castBarCurTime) {
+      elements.castBarCurTime.textContent = formatTime(curSec);
+    }
+    if (elements.castBarTotalTime) {
+      elements.castBarTotalTime.textContent = durSec > 0 ? formatTime(durSec) : "--:--";
+    }
+
+    if (durSec > 0 && !state.castSession.isSeeking) {
+      const pct = Math.min(100, Math.max(0, (curSec / durSec) * 100));
+      if (elements.castBarSliderFill) {
+        elements.castBarSliderFill.style.width = `${pct}%`;
+      }
+      if (elements.castBarSlider) {
+        elements.castBarSlider.value = Math.round(pct * 10);
+      }
+    }
+  }
+
+  function renderCastVolumeUI() {
+    if (elements.castBarVolSlider) {
+      elements.castBarVolSlider.value = Math.round((state.castSession.volume || 1) * 100);
+    }
+    if (elements.castIconVol && elements.castIconVolMute) {
+      if (state.castSession.muted || state.castSession.volume === 0) {
+        elements.castIconVol.classList.add("hidden");
+        elements.castIconVolMute.classList.remove("hidden");
+      } else {
+        elements.castIconVol.classList.remove("hidden");
+        elements.castIconVolMute.classList.add("hidden");
+      }
+    }
+  }
+
+  async function sendCastControl(command, value = null) {
+    if (!state.castSession.entityId) return false;
+    try {
+      const resp = await fetch(apiUrl("api/cast/control"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entity_id: state.castSession.entityId,
+          command: command,
+          value: value,
+        }),
+      });
+      return resp.ok;
+    } catch (err) {
+      console.warn(`Failed to send cast control ${command}:`, err);
+      return false;
+    }
+  }
+
+  async function toggleCastPlayPause() {
+    const isCurrentlyPlaying = state.castSession.state === "playing";
+    const newState = isCurrentlyPlaying ? "paused" : "playing";
+    state.castSession.state = newState;
+    updateCastStatusUI(newState);
+    await sendCastControl("play_pause");
+  }
+
+  async function seekCastRelative(deltaSeconds) {
+    const durSec = state.castSession.duration || 0;
+    let target = (state.castSession.position || 0) + deltaSeconds;
+    if (target < 0) target = 0;
+    if (durSec > 0 && target > durSec) target = durSec;
+
+    state.castSession.position = target;
+    renderCastProgressUI();
+    await sendCastControl("seek", target);
+  }
+
+  function handleCastSliderInput(e) {
+    state.castSession.isSeeking = true;
+    const durSec = state.castSession.duration || 0;
+    const pct = parseInt(e.target.value, 10) / 10;
+    if (elements.castBarSliderFill) {
+      elements.castBarSliderFill.style.width = `${pct}%`;
+    }
+    if (durSec > 0 && elements.castBarCurTime) {
+      const previewSec = Math.round((pct / 100) * durSec);
+      elements.castBarCurTime.textContent = formatTime(previewSec);
+    }
+  }
+
+  async function handleCastSliderChange(e) {
+    const durSec = state.castSession.duration || 0;
+    const pct = parseInt(e.target.value, 10) / 10;
+    if (durSec > 0) {
+      const targetSec = Math.round((pct / 100) * durSec);
+      state.castSession.position = targetSec;
+      await sendCastControl("seek", targetSec);
+    }
+    state.castSession.isSeeking = false;
+  }
+
+  async function toggleCastMute() {
+    state.castSession.muted = !state.castSession.muted;
+    renderCastVolumeUI();
+    await sendCastControl("volume_mute", state.castSession.muted);
+  }
+
+  async function handleCastVolumeChange(e) {
+    const vol = parseInt(e.target.value, 10) / 100;
+    state.castSession.volume = vol;
+    state.castSession.muted = vol === 0;
+    renderCastVolumeUI();
+    await sendCastControl("volume_set", vol);
+  }
+
+  async function stopCastPlayback() {
+    showToast("Interruzione trasmissione Cast...", "info");
+    await sendCastControl("stop");
+    hideCastBar();
+    showToast("Riproduzione interrotta", "success");
+  }
+
+  async function checkActiveCastSession() {
+    try {
+      const resp = await fetch(apiUrl("api/cast/status"));
+      if (!resp.ok) return;
+      const data = await resp.json();
+      if (data && data.active && data.entity_id) {
+        showCastBar({
+          entityId: data.entity_id,
+          deviceName: data.device_name,
+          title: data.title,
+          posterUrl: data.poster_url,
+          isTv: data.media_type === "tv",
+          season: data.season_number,
+          episode: data.episode_number,
+          seekSeconds: data.media_position,
+        });
+      }
+    } catch (err) {
+      console.debug("Could not restore cast session:", err);
+    }
   }
 
   // Start app on DOM ready

@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.2.2
+
+### Nuova Funzionalità: Barra di Controllo e Riproduzione Cast (Mini-Player)
+- **Barra di Riproduzione Cast Persistente a Fondo Schermo**:
+  - Quando si avvia la riproduzione su un dispositivo Cast (Smart TV, Chromecast, Android TV), la scheda dei dettagli si chiude e compare immediatamente in basso una barra di controllo interattiva e fluttuante in stile Spotify/Netflix.
+  - **Dati Media & Info Dispositivo**: Visualizzazione della miniatura/poster, titolo, badge episodio (es. `S3:E3`), nome del dispositivo TV ricevitore e stato real-time con dot animato (`In riproduzione`, `In pausa`, `Caricamento...`).
+  - **Barra di Avanzamento & Seek Interattivo**: Barra temporale con minutaggio trascorso e durata totale (`mm:ss / mm:ss`), slider di seek scorrevole per avanzare o riavvolgere il flusso sulla TV in tempo reale.
+  - **Pulsanti di Controllo Remoto**:
+    - Tasto rapido **⏪ -10s** (indietro di 10 secondi)
+    - Tasto centrale **⏯ Play / Pausa**
+    - Tasto rapido **⏩ +30s** (avanti di 30 secondi)
+    - Cursore e pulsante di gestione **Volume & Mute**
+    - Pulsante **⏹ Stop** per interrompere immediatamente il casting sulla TV e rilasciare la sessione.
+  - **Sincronizzazione Real-Time & Ripristino Sessione**:
+    - Polling continuo con Home Assistant per allineare posizione e stato di riproduzione.
+    - Se l'utente ricarica la pagina o riapre l'app mentre il Cast è in corso, la barra ricompare automaticamente ripristinando lo stato corrente.
+    - Chiusura automatica della barra e aggiornamento della riga "Continua a guardare" quando la riproduzione giunge al termine o la TV entra in standby.
+
 ## 1.2.1
 
 ### Interfaccia & Pulizia UI

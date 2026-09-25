@@ -27,6 +27,7 @@ class HACoreClient:
         self.base_url = base_url.rstrip("/")
         self._cached_host_ip: str | None = None
         self._cast_trackers: dict[str, asyncio.Task] = {}
+        self._active_cast_sessions: dict[str, dict[str, Any]] = {}
 
     @property
     def is_available(self) -> bool:
@@ -208,11 +209,11 @@ class HACoreClient:
         title: str,
         poster_url: str | None = None,
         mime_type: str = "application/vnd.apple.mpegurl",
-    ) -> bool:
+    ) -> tuple[bool, str]:
         """Send play_media command to specified Home Assistant entity with companion fallback."""
         if not self.is_available:
             _LOGGER.error("Cannot play media: SUPERVISOR_TOKEN not configured")
-            return False
+            return False, entity_id
 
         payload: dict[str, Any] = {
             "entity_id": entity_id,
@@ -239,7 +240,7 @@ class HACoreClient:
                         body = await resp.text()
                         _LOGGER.warning("play_media on %s returned status %s: %s", entity_id, resp.status, body)
                     else:
-                        return True
+                        return True, entity_id
         except Exception as err:
             _LOGGER.error("Error sending play_media to %s: %s", entity_id, err)
 
@@ -272,11 +273,11 @@ class HACoreClient:
                     ) as resp:
                         if resp.status in (200, 201):
                             _LOGGER.info("Automatic fallback cast to %s succeeded!", alt_player.entity_id)
-                            return True
+                            return True, alt_player.entity_id
         except Exception as alt_err:
             _LOGGER.debug("Companion fallback cast error: %s", alt_err)
 
-        return False
+        return False, entity_id
 
     async def get_entity_state(self, entity_id: str) -> dict[str, Any] | None:
         """Fetch current state and attributes of a Home Assistant entity."""
@@ -295,26 +296,38 @@ class HACoreClient:
             _LOGGER.debug("Could not fetch state for %s: %s", entity_id, err)
         return None
 
-    async def seek_media(self, entity_id: str, position_seconds: float) -> bool:
-        """Send media_seek command to Home Assistant entity."""
+    async def call_media_player_service(
+        self,
+        service: str,
+        entity_id: str,
+        extra_data: dict[str, Any] | None = None,
+    ) -> bool:
+        """Call a media_player service in Home Assistant Core."""
         if not self.is_available:
             return False
-        payload = {
-            "entity_id": entity_id,
-            "seek_position": float(position_seconds),
-        }
+        payload = {"entity_id": entity_id}
+        if extra_data:
+            payload.update(extra_data)
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    f"{self.base_url}/services/media_player/media_seek",
+                    f"{self.base_url}/services/media_player/{service}",
                     headers=self._get_headers(),
                     json=payload,
                     timeout=aiohttp.ClientTimeout(total=8),
                 ) as resp:
                     return resp.status in (200, 201)
         except Exception as err:
-            _LOGGER.debug("Error seeking on %s to %s: %s", entity_id, position_seconds, err)
+            _LOGGER.warning("Error calling media_player.%s on %s: %s", service, entity_id, err)
             return False
+
+    async def seek_media(self, entity_id: str, position_seconds: float) -> bool:
+        """Send media_seek command to Home Assistant entity."""
+        return await self.call_media_player_service(
+            "media_seek",
+            entity_id,
+            {"seek_position": float(position_seconds)},
+        )
 
     def start_cast_tracker(
         self,
@@ -331,6 +344,17 @@ class HACoreClient:
         """Start background task to sync watch progress while playing on Cast device."""
         if entity_id in self._cast_trackers:
             self._cast_trackers[entity_id].cancel()
+
+        self._active_cast_sessions[entity_id] = {
+            "entity_id": entity_id,
+            "media_id": media_id,
+            "title": title,
+            "media_type": media_type,
+            "poster_url": poster_url,
+            "season_number": season_number,
+            "episode_number": episode_number,
+            "seek_position": seek_position,
+        }
 
         task = asyncio.create_task(
             self._track_cast_playback(
@@ -369,7 +393,7 @@ class HACoreClient:
 
         try:
             while True:
-                await asyncio.sleep(5)
+                await asyncio.sleep(4)
                 state_data = await self.get_entity_state(entity_id)
                 if not state_data:
                     idle_counter += 1
@@ -418,3 +442,79 @@ class HACoreClient:
             _LOGGER.warning("Error in Cast tracker for %s: %s", entity_id, err)
         finally:
             self._cast_trackers.pop(entity_id, None)
+            self._active_cast_sessions.pop(entity_id, None)
+
+    async def get_cast_status(self, entity_id: str | None = None) -> dict[str, Any]:
+        """Return the current playback state and progress of the active Cast entity."""
+        target_id = entity_id
+        session_info: dict[str, Any] = {}
+
+        if target_id and target_id in self._active_cast_sessions:
+            session_info = self._active_cast_sessions[target_id]
+        elif not target_id and self._active_cast_sessions:
+            target_id, session_info = next(iter(self._active_cast_sessions.items()))
+
+        if not target_id:
+            return {"active": False}
+
+        state_data = await self.get_entity_state(target_id)
+        if not state_data:
+            return {"active": False, "entity_id": target_id}
+
+        state = state_data.get("state", "idle").lower()
+        attrs = state_data.get("attributes", {})
+
+        is_active = state in ("playing", "paused", "buffering")
+
+        if not is_active and target_id not in self._cast_trackers:
+            return {"active": False, "entity_id": target_id, "state": state}
+
+        return {
+            "active": is_active,
+            "entity_id": target_id,
+            "device_name": attrs.get("friendly_name") or target_id,
+            "state": state,
+            "title": session_info.get("title") or attrs.get("media_title") or "In riproduzione",
+            "media_id": session_info.get("media_id"),
+            "media_type": session_info.get("media_type"),
+            "poster_url": session_info.get("poster_url") or attrs.get("entity_picture"),
+            "season_number": session_info.get("season_number"),
+            "episode_number": session_info.get("episode_number"),
+            "media_position": float(attrs.get("media_position") or 0.0),
+            "media_position_updated_at": attrs.get("media_position_updated_at"),
+            "media_duration": float(attrs.get("media_duration") or 0.0),
+            "volume_level": float(attrs.get("volume_level") or 1.0),
+            "is_volume_muted": bool(attrs.get("is_volume_muted", False)),
+        }
+
+    async def control_cast(self, entity_id: str, command: str, value: float | None = None) -> bool:
+        """Execute playback command on Cast entity."""
+        if not self.is_available:
+            return False
+
+        cmd = command.lower()
+        if cmd == "play":
+            return await self.call_media_player_service("media_play", entity_id)
+        elif cmd == "pause":
+            return await self.call_media_player_service("media_pause", entity_id)
+        elif cmd == "play_pause":
+            return await self.call_media_player_service("media_play_pause", entity_id)
+        elif cmd == "stop":
+            if entity_id in self._cast_trackers:
+                self._cast_trackers[entity_id].cancel()
+            self._active_cast_sessions.pop(entity_id, None)
+            return await self.call_media_player_service("media_stop", entity_id)
+        elif cmd == "seek":
+            if value is not None:
+                return await self.seek_media(entity_id, max(0.0, float(value)))
+            return False
+        elif cmd == "volume_set":
+            if value is not None:
+                vol = max(0.0, min(1.0, float(value)))
+                return await self.call_media_player_service("volume_set", entity_id, {"volume_level": vol})
+            return False
+        elif cmd == "volume_mute":
+            muted = bool(value) if value is not None else True
+            return await self.call_media_player_service("volume_mute", entity_id, {"is_volume_muted": muted})
+
+        return False
