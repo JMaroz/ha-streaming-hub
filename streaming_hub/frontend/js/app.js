@@ -73,6 +73,7 @@
     btnPlayText: document.getElementById("btn-play-text"),
     playerModal: document.getElementById("player-modal"),
     playerCloseBtn: document.getElementById("player-close-btn"),
+    playerFullscreenBtn: document.getElementById("player-fullscreen-btn"),
     playerTitle: document.getElementById("player-title"),
     videoElement: document.getElementById("video-element"),
     playerSpinner: document.getElementById("player-spinner"),
@@ -188,8 +189,14 @@
     elements.modalClose.addEventListener("click", closeModal);
     elements.modalBackdropClose.addEventListener("click", closeModal);
 
-    // Player Close
+    // Player Close & Fullscreen
     elements.playerCloseBtn.addEventListener("click", closePlayer);
+    if (elements.playerFullscreenBtn) {
+      elements.playerFullscreenBtn.addEventListener("click", toggleFullscreen);
+    }
+    if (elements.videoElement) {
+      elements.videoElement.addEventListener("dblclick", toggleFullscreen);
+    }
 
     // Play Button Trigger
     elements.btnPlayTrigger.addEventListener("click", handlePlayAction);
@@ -720,7 +727,7 @@
   function renderSeasons(seasons) {
     elements.seasonsTabs.innerHTML = "";
     if (!seasons || seasons.length === 0) {
-      elements.episodesList.innerHTML = "<p>Nessun episodio trovato.</p>";
+      elements.episodesList.innerHTML = "<p class='empty-state-text'>Nessuna stagione trovata.</p>";
       return;
     }
 
@@ -732,13 +739,42 @@
         elements.seasonsTabs.querySelectorAll(".season-btn").forEach((b) => b.classList.remove("active"));
         btn.classList.add("active");
         state.selectedSeason = season.number;
-        renderEpisodes(season.episodes || []);
+        activateSeason(season);
       });
       elements.seasonsTabs.appendChild(btn);
     });
 
     state.selectedSeason = seasons[0].number;
-    renderEpisodes(seasons[0].episodes || []);
+    activateSeason(seasons[0]);
+  }
+
+  async function activateSeason(season) {
+    if (season.episodes && season.episodes.length > 0) {
+      renderEpisodes(season.episodes);
+      return;
+    }
+
+    elements.episodesList.innerHTML = `
+      <div style="grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; gap: 12px; padding: 30px; color: var(--text-muted);">
+        <div class="spinner" style="width: 22px; height: 22px; margin: 0; border-width: 2px;"></div>
+        <span>Caricamento episodi della Stagione ${season.number}...</span>
+      </div>
+    `;
+
+    try {
+      const seriesId = state.selectedItem ? state.selectedItem.id : "";
+      const resp = await fetch(apiUrl(`api/catalog/seasons/${seriesId}/${season.number}`));
+      if (resp.ok) {
+        const data = await resp.json();
+        season.episodes = data.episodes || [];
+        renderEpisodes(season.episodes);
+      } else {
+        elements.episodesList.innerHTML = "<p class='empty-state-text'>Nessun episodio caricato per questa stagione.</p>";
+      }
+    } catch (err) {
+      console.warn("Failed to fetch season episodes:", err);
+      elements.episodesList.innerHTML = `<p class='empty-state-text'>Errore nel recupero degli episodi: ${escapeHtml(err.message)}</p>`;
+    }
   }
 
   function renderEpisodes(episodes) {
@@ -963,9 +999,74 @@
       video.src = streamUrl;
       video.play();
     }
+
+    video.ontimeupdate = reportWatchProgress;
+    video.onpause = reportWatchProgress;
+    video.onended = reportWatchProgress;
+  }
+
+  let lastProgressReportTime = 0;
+  function reportWatchProgress() {
+    const video = elements.videoElement;
+    if (!video || !state.selectedItem || !video.currentTime) return;
+    const now = Date.now();
+    if (now - lastProgressReportTime < 10000) return;
+    lastProgressReportTime = now;
+
+    const payload = {
+      media_id: state.selectedItem.id,
+      title: elements.playerTitle.textContent || state.selectedItem.title,
+      media_type: state.selectedItem.type === "tv" || state.selectedItem.seasons ? "tv" : "movie",
+      poster_url: state.selectedItem.poster_url,
+      season_number: state.selectedSeason || null,
+      episode_number: state.selectedEpisode ? state.selectedEpisode.episode_number : null,
+      progress_seconds: video.currentTime,
+      duration_seconds: video.duration || 0,
+    };
+    fetch(apiUrl("api/history"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }).catch(() => {});
+  }
+
+  function toggleFullscreen() {
+    const isFull = !!(document.fullscreenElement || document.webkitFullscreenElement);
+    if (!isFull) {
+      const container = elements.playerModal || elements.videoElement;
+      if (container.requestFullscreen) {
+        container.requestFullscreen().catch(() => {
+          if (elements.videoElement.requestFullscreen) elements.videoElement.requestFullscreen();
+          else if (elements.videoElement.webkitRequestFullscreen) elements.videoElement.webkitRequestFullscreen();
+        });
+      } else if (container.webkitRequestFullscreen) {
+        container.webkitRequestFullscreen();
+      } else if (elements.videoElement.webkitEnterFullscreen) {
+        elements.videoElement.webkitEnterFullscreen();
+      }
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      } else if (document.webkitExitFullscreen) {
+        document.webkitExitFullscreen();
+      }
+    }
   }
 
   function closePlayer() {
+    reportWatchProgress();
+    if (elements.videoElement) {
+      elements.videoElement.ontimeupdate = null;
+      elements.videoElement.onpause = null;
+      elements.videoElement.onended = null;
+    }
+    if (document.fullscreenElement || document.webkitFullscreenElement) {
+      if (document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      } else if (document.webkitExitFullscreen) {
+        document.webkitExitFullscreen();
+      }
+    }
     if (state.hls) {
       state.hls.destroy();
       state.hls = null;

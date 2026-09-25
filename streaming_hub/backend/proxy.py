@@ -110,14 +110,31 @@ class StreamProxy:
                     def _replace_uri(match: re.Match[str]) -> str:
                         orig = match.group(1)
                         abs_uri = urllib.parse.urljoin(base_url, orig)
-                        proxy_uri = f"{prefix}/segment/{token}?url={urllib.parse.quote(abs_uri, safe='')}"
+                        lower_orig = orig.lower()
+                        is_playlist = (
+                            ".m3u8" in lower_orig
+                            or "playlist" in lower_orig
+                            or "rendition=" in lower_orig
+                            or "type=audio" in lower_orig
+                            or "type=subtitles" in lower_orig
+                            or "type=video" in lower_orig
+                        )
+                        endpoint = "stream" if is_playlist else "segment"
+                        proxy_uri = f"{prefix}/{endpoint}/{token}?url={urllib.parse.quote(abs_uri, safe='')}"
                         return f'URI="{proxy_uri}"'
 
                     line = re.sub(r'URI="([^"]+)"', _replace_uri, stripped)
                 rewritten.append(line)
             else:
                 abs_uri = urllib.parse.urljoin(base_url, stripped)
-                is_playlist = ".m3u8" in stripped.lower()
+                lower_stripped = stripped.lower()
+                is_playlist = (
+                    ".m3u8" in lower_stripped
+                    or "playlist" in lower_stripped
+                    or "rendition=" in lower_stripped
+                    or "type=video" in lower_stripped
+                    or "type=audio" in lower_stripped
+                )
                 endpoint = "stream" if is_playlist else "segment"
                 proxy_uri = f"{prefix}/{endpoint}/{token}?url={urllib.parse.quote(abs_uri, safe='')}"
                 rewritten.append(proxy_uri)
@@ -180,11 +197,25 @@ class StreamProxy:
         token: str,
         segment_url: str,
         headers_override: dict[str, str] | None = None,
-    ) -> StreamingResponse:
-        """Proxy binary TS or M4S chunk with range headers."""
+        root_path: str = "",
+    ) -> Response | StreamingResponse:
+        """Proxy binary TS or M4S chunk with range headers, delegating playlists to get_stream_response."""
         session = self.get_stream(token)
         if not session:
             raise HTTPException(status_code=404, detail="Stream session not found or expired")
+
+        # If this URL is actually an HLS sub-playlist, delegate to get_stream_response
+        lower_url = segment_url.lower()
+        if (
+            ".m3u8" in lower_url
+            or "playlist" in lower_url
+            or "rendition=" in lower_url
+            or "type=video" in lower_url
+            or "type=audio" in lower_url
+        ):
+            return await self.get_stream_response(
+                token, target_url=segment_url, root_path=root_path, headers_override=headers_override
+            )
 
         client = await self._get_client_session()
 
@@ -205,13 +236,29 @@ class StreamProxy:
             status_code = upstream_resp.status
             content_type = upstream_resp.headers.get("Content-Type", "video/MP2T")
 
+            # Check if upstream returned a text playlist despite URL not matching
+            if content_type.startswith("text/") or "mpegurl" in content_type:
+                raw_text = await upstream_resp.text()
+                upstream_resp.close()
+                if "#EXTM3U" in raw_text:
+                    rewritten = self.rewrite_m3u8(raw_text, str(upstream_resp.url), token, root_path=root_path)
+                    return Response(
+                        content=rewritten,
+                        media_type="application/vnd.apple.mpegurl",
+                        headers={
+                            "Cache-Control": "no-cache, no-store, must-revalidate",
+                            "Access-Control-Allow-Origin": "*",
+                        },
+                    )
+
             out_headers: dict[str, str] = {
                 "Content-Type": content_type,
                 "Access-Control-Allow-Origin": "*",
                 "Cache-Control": "public, max-age=3600",
             }
 
-            for header_name in ("Content-Range", "Accept-Ranges", "Content-Length"):
+            # Forward Content-Range and Accept-Ranges without Content-Length to prevent uvicorn length mismatches
+            for header_name in ("Content-Range", "Accept-Ranges"):
                 if header_name in upstream_resp.headers:
                     out_headers[header_name] = upstream_resp.headers[header_name]
 

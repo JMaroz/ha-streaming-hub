@@ -18,6 +18,7 @@ import uvicorn
 
 import aiohttp
 
+from .database import MediaDatabase
 from .dns_resolver import DNS_DEFAULT
 from .ha_client import HACoreClient
 from .metadata import MetadataEnricher
@@ -103,6 +104,7 @@ logging.basicConfig(
 ha_client = HACoreClient()
 stream_proxy = StreamProxy()
 metadata_enricher = MetadataEnricher(tmdb_api_key=CONFIG.get("tmdb_api_key"))
+db = MediaDatabase()
 
 # Initialize Source Manager
 source_manager = SourceManager()
@@ -148,6 +150,7 @@ async def init_sources(sources_list: list[dict[str, Any]], custom_dns: str) -> N
 async def lifespan(app: FastAPI):
     """Manage application startup and shutdown lifecycle."""
     _LOGGER.info("Starting Streaming Hub Engine...")
+    await db.init()
     custom_dns = CONFIG.get("custom_dns", DNS_DEFAULT)
     custom_sources = CONFIG.get("custom_sources", [])
 
@@ -207,6 +210,24 @@ class CastRequest(BaseModel):
 class TestSourceRequest(BaseModel):
     url: str
     type: str = "auto"
+
+
+class ProgressRequest(BaseModel):
+    media_id: str
+    title: str
+    media_type: str = "movie"
+    poster_url: str | None = None
+    season_number: int | None = None
+    episode_number: int | None = None
+    progress_seconds: float = 0
+    duration_seconds: float = 0
+
+
+class FavoriteRequest(BaseModel):
+    title_id: str
+    media_type: str = "movie"
+    title: str
+    poster_url: str | None = None
 
 
 # Helpers
@@ -333,7 +354,12 @@ async def get_by_genre(
 
 @app.get("/api/catalog/title/{media_type}/{title_id}")
 async def get_title_details(media_type: str, title_id: str) -> dict[str, Any]:
-    """Fetch complete details, enriched metadata, and sources for a title."""
+    """Fetch complete details, enriched metadata, and sources for a title with SQLite caching."""
+    # Check SQLite cache first for instant response
+    cached = await db.get_title(title_id)
+    if cached:
+        return cached
+
     try:
         item = await source_manager.get_details(media_type, title_id)
     except Exception as err:
@@ -345,19 +371,72 @@ async def get_title_details(media_type: str, title_id: str) -> dict[str, Any]:
         await metadata_enricher.enrich_movie(item)
     elif isinstance(item, TvSeries):
         await metadata_enricher.enrich_tv_series(item)
+        # Cache any pre-loaded seasons/episodes
+        for s in item.seasons:
+            if s.episodes:
+                await db.save_season(item.id, s)
 
+    # Persist in SQLite
+    await db.save_title(item)
     return item.to_dict()
 
 
 @app.get("/api/catalog/seasons/{series_id}/{season_number}")
 async def get_season_episodes(series_id: str, season_number: int) -> dict[str, Any]:
-    """Retrieve episodes for a specific TV series season."""
+    """Retrieve episodes for a specific TV series season with SQLite caching."""
+    # Check SQLite cache first
+    cached_season = await db.get_season(series_id, season_number)
+    if cached_season and cached_season.episodes:
+        return cached_season.to_dict()
+
     try:
         season = await source_manager.get_season(series_id, season_number)
+        if season and season.episodes:
+            await db.save_season(series_id, season)
         return season.to_dict()
     except Exception as err:
         _LOGGER.error("Error fetching season %s for %s: %s", season_number, series_id, err)
         raise HTTPException(status_code=404, detail=f"Stagione non trovata: {err}")
+
+
+@app.post("/api/history")
+async def save_progress(req: ProgressRequest) -> dict[str, Any]:
+    """Save or update video watch progress in SQLite database."""
+    await db.save_watch_progress(
+        media_id=req.media_id,
+        title=req.title,
+        media_type=req.media_type,
+        poster_url=req.poster_url,
+        season_number=req.season_number,
+        episode_number=req.episode_number,
+        progress_seconds=req.progress_seconds,
+        duration_seconds=req.duration_seconds,
+    )
+    return {"status": "ok"}
+
+
+@app.get("/api/history")
+async def get_history(limit: int = Query(30, ge=1, le=100)) -> list[dict[str, Any]]:
+    """Retrieve user watch history from SQLite database."""
+    return await db.get_watch_history(limit=limit)
+
+
+@app.post("/api/favorites/toggle")
+async def toggle_favorite(req: FavoriteRequest) -> dict[str, Any]:
+    """Toggle a title as user favorite in SQLite database."""
+    is_fav = await db.toggle_favorite(
+        title_id=req.title_id,
+        media_type=req.media_type,
+        title=req.title,
+        poster_url=req.poster_url,
+    )
+    return {"status": "ok", "favorite": is_fav}
+
+
+@app.get("/api/favorites")
+async def get_favorites() -> list[dict[str, Any]]:
+    """Retrieve all user favorites from SQLite database."""
+    return await db.get_favorites()
 
 
 @app.post("/api/resolve")
@@ -469,11 +548,13 @@ async def get_stream(token: str, request: Request, url: str | None = None) -> Re
 @app.get("/segment/{token}")
 async def get_segment(token: str, url: str = Query(...), request: Request = None) -> Response:
     """HLS segment proxy forwarding injected headers."""
+    ingress_path = get_ingress_path(request) if request else ""
     headers_dict = dict(request.headers) if request else {}
     return await stream_proxy.get_segment_response(
         token=token,
         segment_url=url,
         headers_override=headers_dict,
+        root_path=ingress_path,
     )
 
 

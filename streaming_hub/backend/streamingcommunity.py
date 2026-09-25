@@ -624,7 +624,13 @@ class StreamingCommunityClient:
     async def get_movie(self, media_id: str, slug: str = "") -> Movie:
         """Fetch complete movie details."""
         clean_id = media_id.replace("sc-", "")
-        clean_sc_id = clean_id.split("-")[0]
+        if not slug and "-" in clean_id:
+            parts = clean_id.split("-", 1)
+            clean_sc_id = parts[0]
+            slug = parts[1]
+        else:
+            clean_sc_id = clean_id.split("-")[0]
+
         title_url = f"{self.base_url}it/titles/{clean_sc_id}-{slug}" if slug else f"{self.base_url}it/titles/{clean_sc_id}"
 
         title_data: dict[str, Any] | None = None
@@ -638,7 +644,17 @@ class StreamingCommunityClient:
         if not title_data and clean_sc_id:
             preview = await self.get_title_preview(clean_sc_id)
             if preview and isinstance(preview, dict):
-                title_data = preview
+                preview_slug = preview.get("slug")
+                if preview_slug and preview_slug != slug:
+                    retry_url = f"{self.base_url}it/titles/{clean_sc_id}-{preview_slug}"
+                    try:
+                        html_text = await self._request(retry_url)
+                        page_data = self.extract_data_page(html_text)
+                        title_data = page_data.get("props", {}).get("title")
+                    except Exception:
+                        pass
+                if not title_data:
+                    title_data = preview
 
         if not title_data or not isinstance(title_data, dict):
             raise ValueError(f"No title data found for movie {media_id}")
@@ -690,7 +706,13 @@ class StreamingCommunityClient:
     async def get_tv_series(self, media_id: str, slug: str = "") -> TvSeries:
         """Fetch complete TV series details with all seasons."""
         clean_id = media_id.replace("sc-", "")
-        clean_sc_id = clean_id.split("-")[0]
+        if not slug and "-" in clean_id:
+            parts = clean_id.split("-", 1)
+            clean_sc_id = parts[0]
+            slug = parts[1]
+        else:
+            clean_sc_id = clean_id.split("-")[0]
+
         series_url = f"{self.base_url}it/titles/{clean_sc_id}-{slug}" if slug else f"{self.base_url}it/titles/{clean_sc_id}"
 
         title_data: dict[str, Any] | None = None
@@ -706,7 +728,19 @@ class StreamingCommunityClient:
         if not title_data and clean_sc_id:
             preview = await self.get_title_preview(clean_sc_id)
             if preview and isinstance(preview, dict):
-                title_data = preview
+                preview_slug = preview.get("slug")
+                if preview_slug and preview_slug != slug:
+                    retry_url = f"{self.base_url}it/titles/{clean_sc_id}-{preview_slug}"
+                    try:
+                        html_text = await self._request(retry_url)
+                        page_data = self.extract_data_page(html_text)
+                        props = page_data.get("props", {})
+                        title_data = props.get("title")
+                        slug = preview_slug
+                    except Exception as retry_err:
+                        _LOGGER.debug("Retry series URL %s failed: %s", retry_url, retry_err)
+                if not title_data:
+                    title_data = preview
 
         if not title_data or not isinstance(title_data, dict):
             raise ValueError(f"No title data found for series {media_id}")
@@ -716,23 +750,52 @@ class StreamingCommunityClient:
         raw_seasons = title_data.get("seasons", [])
         series.seasons = []
 
+        loaded_season = props.get("loadedSeason") if isinstance(props, dict) else None
+        loaded_season_num: int | None = None
+        if isinstance(loaded_season, dict) and loaded_season.get("number") is not None:
+            with contextlib.suppress(ValueError):
+                loaded_season_num = int(loaded_season["number"])
+
         for s in (raw_seasons if isinstance(raw_seasons, list) else []):
             if not isinstance(s, dict):
                 continue
             s_num = s.get("number")
             if s_num is not None:
-                season = await self.get_tv_season(clean_sc_id, actual_slug, int(s_num))
+                s_int = int(s_num)
+                if loaded_season and loaded_season_num == s_int:
+                    season = self._parse_loaded_season(clean_sc_id, s_int, loaded_season)
+                else:
+                    season = await self.get_tv_season(clean_sc_id, actual_slug, s_int)
                 series.seasons.append(season)
+
+        # Fallback if no seasons were in raw_seasons but loadedSeason exists
+        if not series.seasons and loaded_season and loaded_season_num is not None:
+            series.seasons.append(self._parse_loaded_season(clean_sc_id, loaded_season_num, loaded_season))
 
         return series
 
     async def get_tv_season(self, sc_id: str, slug: str, season_num: int) -> TvSeason:
         """Fetch episodes for a specific TV season."""
-        slug_part = f"{sc_id}-{slug}" if slug else sc_id
+        clean_sc_id = str(sc_id).replace("sc-", "")
+        if not slug and "-" in clean_sc_id:
+            parts = clean_sc_id.split("-", 1)
+            clean_sc_id = parts[0]
+            slug = parts[1]
+        elif "-" in clean_sc_id:
+            clean_sc_id = clean_sc_id.split("-")[0]
+
+        if not slug:
+            preview = await self.get_title_preview(clean_sc_id)
+            if preview and preview.get("slug"):
+                slug = str(preview["slug"])
+
+        slug_part = f"{clean_sc_id}-{slug}" if slug else clean_sc_id
         candidates = [
             f"{self.base_url}it/titles/{slug_part}/stagione-{season_num}",
             f"{self.base_url}it/titles/{slug_part}/season-{season_num}",
         ]
+        if slug:
+            candidates.append(f"{self.base_url}it/titles/{clean_sc_id}/stagione-{season_num}")
 
         html_text = ""
         for season_url in candidates:
@@ -750,7 +813,7 @@ class StreamingCommunityClient:
             page_data = self.extract_data_page(html_text)
             loaded_season = page_data.get("props", {}).get("loadedSeason")
             if isinstance(loaded_season, dict):
-                return self._parse_loaded_season(sc_id, season_num, loaded_season)
+                return self._parse_loaded_season(clean_sc_id, season_num, loaded_season)
         except Exception as err:
             _LOGGER.debug("Error parsing season %s: %s", season_num, err)
 
