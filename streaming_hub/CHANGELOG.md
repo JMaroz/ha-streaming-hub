@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.1
+
+### Interfaccia & Pulizia UI
+- **Rimozione Pulsanti Ridondanti dalla Navbar**:
+  - Rimossi il pulsante `⚙ Sorgenti` e il badge `🟢 HA Connesso` dalla barra di navigazione in alto.
+  - La configurazione delle sorgenti personalizzate (`custom_sources`), DNS, TMDb e porte è demandata interamente alla scheda nativa **Configurazione** dell'add-on in Home Assistant, eliminando duplicazioni e modali non necessarie dal frontend.
+  - Ottimizzato lo spazio della barra di ricerca e la pulizia visiva complessiva su desktop e dispositivi mobili.
+
 ## 1.2.0
 
 ### Novità & Funzionalità

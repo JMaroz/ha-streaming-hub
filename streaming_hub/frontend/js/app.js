@@ -38,8 +38,6 @@
     sourcesChips: document.getElementById("sources-chips"),
     searchInput: document.getElementById("search-input"),
     searchClear: document.getElementById("search-clear"),
-    haBadge: document.getElementById("ha-badge"),
-    haBadgeText: document.getElementById("ha-badge-text"),
     heroSection: document.getElementById("hero-section"),
     heroBackdrop: document.getElementById("hero-backdrop"),
     heroType: document.getElementById("hero-type"),
@@ -83,17 +81,7 @@
     videoElement: document.getElementById("video-element"),
     playerSpinner: document.getElementById("player-spinner"),
     toastContainer: document.getElementById("toast-container"),
-    btnSettingsToggle: document.getElementById("btn-settings-toggle"),
     onboardingState: document.getElementById("onboarding-state"),
-    btnOpenSettings: document.getElementById("btn-open-settings"),
-    settingsModal: document.getElementById("settings-modal"),
-    settingsClose: document.getElementById("settings-close"),
-    settingsBackdropClose: document.getElementById("settings-backdrop-close"),
-    settingsActiveSources: document.getElementById("settings-active-sources"),
-    testSourceUrl: document.getElementById("test-source-url"),
-    testSourceType: document.getElementById("test-source-type"),
-    btnTestSource: document.getElementById("btn-test-source"),
-    testSourceResult: document.getElementById("test-source-result"),
   };
 
   // Helper: Format base API URL respecting Ingress
@@ -122,13 +110,6 @@
         const data = await resp.json();
         if (data.ingress_path) {
           state.ingressPath = data.ingress_path;
-        }
-        if (data.supervisor_connected) {
-          elements.haBadge.className = "ha-badge";
-          elements.haBadgeText.textContent = "HA Connesso";
-        } else {
-          elements.haBadge.className = "ha-badge warning";
-          elements.haBadgeText.textContent = "HA Non Connesso";
         }
       }
     } catch (err) {
@@ -223,31 +204,12 @@
       updatePlayButtonText();
     });
 
-    // Settings Modal
-    if (elements.btnSettingsToggle) {
-      elements.btnSettingsToggle.addEventListener("click", openSettings);
-    }
-    if (elements.btnOpenSettings) {
-      elements.btnOpenSettings.addEventListener("click", openSettings);
-    }
-    if (elements.settingsClose) {
-      elements.settingsClose.addEventListener("click", closeSettings);
-    }
-    if (elements.settingsBackdropClose) {
-      elements.settingsBackdropClose.addEventListener("click", closeSettings);
-    }
-    if (elements.btnTestSource) {
-      elements.btnTestSource.addEventListener("click", handleTestSource);
-    }
-
     // Keyboard Esc
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
-        if (!elements.settingsModal.classList.contains("hidden")) {
-          closeSettings();
-        } else if (!elements.playerModal.classList.contains("hidden")) {
+        if (elements.playerModal && !elements.playerModal.classList.contains("hidden")) {
           closePlayer();
-        } else if (!elements.detailsModal.classList.contains("hidden")) {
+        } else if (elements.detailsModal && !elements.detailsModal.classList.contains("hidden")) {
           closeModal();
         }
       }
@@ -391,88 +353,6 @@
       loadByGenre(state.activeGenre);
     } else {
       loadCatalog();
-    }
-  }
-
-  // Settings & Sources Modal
-  function openSettings() {
-    renderSettingsModal();
-    if (elements.settingsModal) {
-      elements.settingsModal.classList.remove("hidden");
-      document.body.style.overflow = "hidden";
-    }
-  }
-
-  function closeSettings() {
-    if (elements.settingsModal) {
-      elements.settingsModal.classList.add("hidden");
-      document.body.style.overflow = "";
-    }
-  }
-
-  function renderSettingsModal() {
-    if (!elements.settingsActiveSources) return;
-    elements.settingsActiveSources.innerHTML = "";
-    if (!state.availableSources || state.availableSources.length === 0) {
-      elements.settingsActiveSources.innerHTML = `
-        <div class="source-item">
-          <div class="source-item-info">
-            <span class="source-item-name">Nessuna sorgente attiva</span>
-          </div>
-          <span class="source-item-badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171;">Non configurato</span>
-        </div>
-      `;
-      return;
-    }
-
-    state.availableSources.forEach((src) => {
-      const item = document.createElement("div");
-      item.className = "source-item";
-      item.innerHTML = `
-        <div class="source-item-info">
-          <span class="source-chip-dot"></span>
-          <span class="source-item-name">${escapeHtml(src.name)}</span>
-        </div>
-        <span class="source-item-badge">${escapeHtml(src.id)}</span>
-      `;
-      elements.settingsActiveSources.appendChild(item);
-    });
-  }
-
-  async function handleTestSource() {
-    const url = (elements.testSourceUrl.value || "").trim();
-    const type = elements.testSourceType.value;
-    if (!url) {
-      showToast("Inserisci un URL valido da testare", "warning");
-      return;
-    }
-
-    elements.testSourceResult.className = "test-result-box";
-    elements.testSourceResult.classList.remove("hidden");
-    elements.testSourceResult.textContent = "Analisi e fingerprinting del mirror in corso...";
-
-    try {
-      const resp = await fetch(apiUrl("api/settings/sources/test"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url, type }),
-      });
-      if (!resp.ok) throw new Error("Errore durante il test");
-      const data = await resp.json();
-      if (data.supported) {
-        elements.testSourceResult.className = "test-result-box success";
-        elements.testSourceResult.innerHTML = `
-          ✓ <strong>Compatibile!</strong> Motore identificato: <strong>${escapeHtml(data.detected_type)}</strong>. Puoi aggiungere questo URL in Home Assistant.
-        `;
-      } else {
-        elements.testSourceResult.className = "test-result-box error";
-        elements.testSourceResult.innerHTML = `
-          ✕ <strong>Non riconosciuto</strong>: l'URL non ha superato il fingerprinting. Verifica che il sito sia raggiungibile o seleziona il tipo esplicito.
-        `;
-      }
-    } catch (err) {
-      elements.testSourceResult.className = "test-result-box error";
-      elements.testSourceResult.textContent = `Errore di connessione o timeout: ${err.message}`;
     }
   }
 

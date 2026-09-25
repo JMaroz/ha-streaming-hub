@@ -43,20 +43,6 @@
             <button id="search-clear" class="btn-clear hidden">✕</button>
           </div>
         </div>
-
-        <div class="nav-actions">
-          <button id="btn-settings-toggle" class="btn-settings" title="Gestione Sorgenti & Impostazioni">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="3"/>
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-            </svg>
-            <span>Sorgenti</span>
-          </button>
-          <div id="ha-badge" class="ha-badge" title="Stato connessione Home Assistant">
-            <span class="pulse-dot"></span>
-            <span id="ha-badge-text">HA Connesso</span>
-          </div>
-        </div>
       </div>
 
       <!-- Genres Dropdown Bar -->
@@ -146,10 +132,7 @@
         <div id="onboarding-state" class="empty-state onboarding-card hidden">
           <div class="onboarding-icon">📡</div>
           <h3>Nessuna sorgente configurata</h3>
-          <p>Streaming Hub è un motore neutrale che non include link o sorgenti predefinite.<br>Aggiungi gli indirizzi web delle tue sorgenti nelle impostazioni dell'Add-on in Home Assistant per iniziare a sfogliare i contenuti.</p>
-          <div class="onboarding-actions">
-            <button id="btn-open-settings" class="btn btn-primary">Gestione Sorgenti & Rilevamento</button>
-          </div>
+          <p>Streaming Hub è un motore neutrale che non include link o sorgenti predefinite.<br>Per configurare le tue sorgenti, vai su <strong>Impostazioni &gt; Componenti aggiuntivi &gt; Streaming Hub &gt; Configurazione</strong> in Home Assistant e inserisci gli URL nell'elenco <code>custom_sources</code>.</p>
         </div>
       </section>
     </main>
@@ -259,45 +242,6 @@
         <div id="player-spinner" class="player-spinner hidden">
           <div class="spinner"></div>
           <p>Buffering flusso HLS...</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- Settings & Sources Modal -->
-    <div id="settings-modal" class="modal hidden">
-      <div class="modal-backdrop" id="settings-backdrop-close"></div>
-      <div class="modal-dialog modal-dialog-sm">
-        <button id="settings-close" class="modal-close-btn" aria-label="Chiudi">✕</button>
-        <div class="settings-content">
-          <h2>⚙️ Gestione Sorgenti & Rilevamento</h2>
-          <p class="settings-subtitle">Streaming Hub supporta l'auto-rilevamento intelligente: analizza l'HTML del mirror inserito per determinare il motore compatibile.</p>
-          
-          <div class="settings-section">
-            <h3 class="settings-section-title">Sorgenti Attive nel Sistema</h3>
-            <div id="settings-active-sources" class="active-sources-list">
-              <!-- Populated dynamically -->
-            </div>
-          </div>
-
-          <div class="settings-section">
-            <h3 class="settings-section-title">Testa URL & Auto-Discriminazione</h3>
-            <p class="settings-desc-sm">Verifica se un URL o mirror viene riconosciuto correttamente prima di aggiungerlo alla configurazione di Home Assistant:</p>
-            <div class="test-source-box">
-              <input type="url" id="test-source-url" placeholder="https://tuo-indirizzo-sorgente..." class="form-input">
-              <select id="test-source-type" class="form-select">
-                <option value="auto">Auto-Rileva Tipo</option>
-                <option value="streamingcommunity">StreamingCommunity</option>
-                <option value="cb01">CB01</option>
-              </select>
-              <button id="btn-test-source" class="btn btn-secondary">Analizza & Testa</button>
-            </div>
-            <div id="test-source-result" class="test-result-box hidden"></div>
-          </div>
-
-          <div class="settings-hint">
-            <strong>💡 Configurazione permanente in Home Assistant:</strong>
-            <p>Per salvare le tue sorgenti, vai su <code>Impostazioni &gt; Componenti aggiuntivi &gt; Streaming Hub &gt; Configurazione</code> e inserisci gli URL nell'array <code>custom_sources</code>.</p>
-          </div>
         </div>
       </div>
     </div>
