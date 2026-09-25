@@ -175,7 +175,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Streaming Hub",
     description="Home Assistant App for media streaming, HLS proxying, and Cast control",
-    version="1.1.0",
+    version="1.1.1",
     lifespan=lifespan,
 )
 
@@ -249,7 +249,7 @@ async def get_status(request: Request) -> dict[str, Any]:
     return {
         "status": "online",
         "app_name": "Streaming Hub",
-        "version": "1.1.0",
+        "version": "1.1.1",
         "ingress_path": ingress_path,
         "ha_host_ip": ha_host,
         "stream_port": CONFIG.get("stream_port", 8099),
@@ -532,9 +532,9 @@ async def cast_to_device(req: CastRequest) -> dict[str, Any]:
 
 
 # Proxy stream endpoints
-@app.get("/stream/{token}")
+@app.api_route("/stream/{token}", methods=["GET", "HEAD"])
 async def get_stream(token: str, request: Request, url: str | None = None) -> Response:
-    """Stream or sub-playlist proxy."""
+    """Stream or sub-playlist proxy supporting GET and HEAD."""
     ingress_path = get_ingress_path(request)
     headers_dict = dict(request.headers)
     return await stream_proxy.get_stream_response(
@@ -542,12 +542,13 @@ async def get_stream(token: str, request: Request, url: str | None = None) -> Re
         target_url=url,
         root_path=ingress_path,
         headers_override=headers_dict,
+        method=request.method,
     )
 
 
-@app.get("/segment/{token}")
+@app.api_route("/segment/{token}", methods=["GET", "HEAD"])
 async def get_segment(token: str, url: str = Query(...), request: Request = None) -> Response:
-    """HLS segment proxy forwarding injected headers."""
+    """HLS segment proxy forwarding injected headers supporting GET and HEAD."""
     ingress_path = get_ingress_path(request) if request else ""
     headers_dict = dict(request.headers) if request else {}
     return await stream_proxy.get_segment_response(
@@ -555,6 +556,7 @@ async def get_segment(token: str, url: str = Query(...), request: Request = None
         segment_url=url,
         headers_override=headers_dict,
         root_path=ingress_path,
+        method=request.method if request else "GET",
     )
 
 

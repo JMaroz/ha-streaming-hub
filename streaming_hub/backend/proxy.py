@@ -147,8 +147,9 @@ class StreamProxy:
         target_url: str | None = None,
         root_path: str = "",
         headers_override: dict[str, str] | None = None,
+        method: str = "GET",
     ) -> Response:
-        """Fetch and rewrite master or media HLS playlist."""
+        """Fetch and rewrite master or media HLS playlist with HEAD support."""
         session = self.get_stream(token)
         if not session:
             raise HTTPException(status_code=404, detail="Stream session not found or expired")
@@ -175,6 +176,16 @@ class StreamProxy:
                         detail=f"Upstream returned HTTP {upstream.status}",
                     )
 
+                if method.upper() == "HEAD":
+                    return Response(
+                        status_code=upstream.status,
+                        media_type="application/vnd.apple.mpegurl",
+                        headers={
+                            "Cache-Control": "no-cache, no-store, must-revalidate",
+                            "Access-Control-Allow-Origin": "*",
+                        },
+                    )
+
                 raw_text = await upstream.text()
                 rewritten = self.rewrite_m3u8(raw_text, str(upstream.url), token, root_path=root_path)
 
@@ -198,6 +209,7 @@ class StreamProxy:
         segment_url: str,
         headers_override: dict[str, str] | None = None,
         root_path: str = "",
+        method: str = "GET",
     ) -> Response | StreamingResponse:
         """Proxy binary TS or M4S chunk with range headers, delegating playlists to get_stream_response."""
         session = self.get_stream(token)
@@ -214,7 +226,7 @@ class StreamProxy:
             or "type=audio" in lower_url
         ):
             return await self.get_stream_response(
-                token, target_url=segment_url, root_path=root_path, headers_override=headers_override
+                token, target_url=segment_url, root_path=root_path, headers_override=headers_override, method=method
             )
 
         client = await self._get_client_session()
@@ -236,6 +248,26 @@ class StreamProxy:
             status_code = upstream_resp.status
             content_type = upstream_resp.headers.get("Content-Type", "video/MP2T")
 
+            out_headers: dict[str, str] = {
+                "Content-Type": content_type,
+                "Access-Control-Allow-Origin": "*",
+                "Cache-Control": "public, max-age=3600",
+            }
+
+            # Forward Content-Range and Accept-Ranges without Content-Length
+            for header_name in ("Content-Range", "Accept-Ranges"):
+                if header_name in upstream_resp.headers:
+                    out_headers[header_name] = upstream_resp.headers[header_name]
+
+            # If client made a HEAD request (e.g. Philips TV or Chromecast probing chunk), respond immediately without body
+            if method.upper() == "HEAD":
+                upstream_resp.close()
+                return Response(
+                    status_code=status_code,
+                    headers=out_headers,
+                    media_type=content_type,
+                )
+
             # Check if upstream returned a text playlist despite URL not matching
             if content_type.startswith("text/") or "mpegurl" in content_type:
                 raw_text = await upstream_resp.text()
@@ -250,17 +282,6 @@ class StreamProxy:
                             "Access-Control-Allow-Origin": "*",
                         },
                     )
-
-            out_headers: dict[str, str] = {
-                "Content-Type": content_type,
-                "Access-Control-Allow-Origin": "*",
-                "Cache-Control": "public, max-age=3600",
-            }
-
-            # Forward Content-Range and Accept-Ranges without Content-Length to prevent uvicorn length mismatches
-            for header_name in ("Content-Range", "Accept-Ranges"):
-                if header_name in upstream_resp.headers:
-                    out_headers[header_name] = upstream_resp.headers[header_name]
 
             async def iterfile() -> AsyncGenerator[bytes, None]:
                 try:

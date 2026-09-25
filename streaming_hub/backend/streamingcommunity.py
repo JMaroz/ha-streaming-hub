@@ -675,7 +675,8 @@ class StreamingCommunityClient:
             name = ep.get("name") or f"Episodio {ep_num}"
             plot = ep.get("plot")
             poster_url = self._get_image_url(ep.get("images"), "cover")
-            watch_url = f"{self.base_url}it/watch/{sc_id}?episode_id={ep_id}"
+            # Use direct iframe URL to prevent Inertia SSR from defaulting to S01E01
+            watch_url = f"{self.base_url}it/iframe/{sc_id}?episode_id={ep_id}"
 
             source = ProviderSource(
                 id=f"sc-ep-{ep_id}",
@@ -791,10 +792,11 @@ class StreamingCommunityClient:
 
         slug_part = f"{clean_sc_id}-{slug}" if slug else clean_sc_id
         candidates = [
-            f"{self.base_url}it/titles/{slug_part}/stagione-{season_num}",
             f"{self.base_url}it/titles/{slug_part}/season-{season_num}",
+            f"{self.base_url}it/titles/{slug_part}/stagione-{season_num}",
         ]
         if slug:
+            candidates.append(f"{self.base_url}it/titles/{clean_sc_id}/season-{season_num}")
             candidates.append(f"{self.base_url}it/titles/{clean_sc_id}/stagione-{season_num}")
 
         html_text = ""
@@ -826,6 +828,9 @@ class StreamingCommunityClient:
     ) -> tuple[str, dict[str, str]]:
         """Resolve a StreamingCommunity watch URL to an HLS .m3u8 playlist URL and required headers."""
         current_url = watch_url
+        # If this is an episode watch URL, transform to iframe directly to avoid Inertia SSR defaulting to S01E01
+        if "episode_id=" in current_url and "/it/watch/" in current_url:
+            current_url = current_url.replace("/it/watch/", "/it/iframe/")
         headers = {"User-Agent": USER_AGENT}
         visited: set[str] = set()
         vix_html: str | None = None

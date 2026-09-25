@@ -148,27 +148,30 @@ class HACoreClient:
                 if any(spk in name_lower for spk in speaker_keywords):
                     continue
 
-                # Determine if it is a Cast or TV device
-                is_cast = (
+                # Determine if it is a native Cast receiver or general TV control
+                is_google_cast = (
                     "cast" in id_lower
                     or "chromecast" in id_lower
-                    or "cast" in name_lower
-                    or "tv" in id_lower
-                    or "tv" in name_lower
-                    or device_class in ("tv", "receiver")
+                    or "google" in id_lower
+                    or "tpm" in id_lower
+                    or "app_id" in attrs
+                    or "media_content_type" in attrs
                 )
+
+                label_suffix = " [Google Cast]" if is_google_cast else " [Controllo TV]"
+                display_name = f"{friendly_name}{label_suffix}"
 
                 players.append(
                     CastDeviceInfo(
                         entity_id=entity_id,
-                        name=friendly_name,
-                        is_cast=is_cast,
+                        name=display_name,
+                        is_cast=is_google_cast,
                         state=current_state,
                         device_class=device_class,
                     )
                 )
 
-            # Prioritize Cast and TV devices first
+            # Prioritize native Google Cast devices first
             players.sort(key=lambda p: (not p.is_cast, p.name))
         except Exception as err:
             _LOGGER.error("Failed to fetch media players from Home Assistant: %s", err)
@@ -183,7 +186,7 @@ class HACoreClient:
         poster_url: str | None = None,
         mime_type: str = "application/vnd.apple.mpegurl",
     ) -> bool:
-        """Send play_media command to specified Home Assistant entity."""
+        """Send play_media command to specified Home Assistant entity with companion fallback."""
         if not self.is_available:
             _LOGGER.error("Cannot play media: SUPERVISOR_TOKEN not configured")
             return False
@@ -198,19 +201,56 @@ class HACoreClient:
             },
         }
 
+        # Timeout 25s to allow standby TVs to turn on and launch Cast receiver
+        success = False
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     f"{self.base_url}/services/media_player/play_media",
                     headers=self._get_headers(),
                     json=payload,
-                    timeout=aiohttp.ClientTimeout(total=8),
+                    timeout=aiohttp.ClientTimeout(total=25),
                 ) as resp:
                     success = resp.status in (200, 201)
                     if not success:
                         body = await resp.text()
-                        _LOGGER.warning("play_media returned status %s: %s", resp.status, body)
-                    return success
+                        _LOGGER.warning("play_media on %s returned status %s: %s", entity_id, resp.status, body)
+                    else:
+                        return True
         except Exception as err:
             _LOGGER.error("Error sending play_media to %s: %s", entity_id, err)
-            return False
+
+        # Smart fallback: if the chosen entity failed (e.g. TV control entity returned 500),
+        # automatically try companion Cast entity (e.g. tpm191e)
+        try:
+            companion_players = await self.get_media_players()
+            clean_target = entity_id.replace("media_player.", "").split("_")[0]
+            alt_player = next(
+                (
+                    p for p in companion_players
+                    if p.is_cast and p.entity_id != entity_id and (
+                        clean_target in p.entity_id.lower()
+                        or "tpm" in p.entity_id.lower()
+                        or "cast" in p.entity_id.lower()
+                    )
+                ),
+                None,
+            )
+            if alt_player:
+                _LOGGER.info("Attempting automatic fallback cast to companion device %s (%s)...", alt_player.entity_id, alt_player.name)
+                alt_payload = dict(payload)
+                alt_payload["entity_id"] = alt_player.entity_id
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        f"{self.base_url}/services/media_player/play_media",
+                        headers=self._get_headers(),
+                        json=alt_payload,
+                        timeout=aiohttp.ClientTimeout(total=25),
+                    ) as resp:
+                        if resp.status in (200, 201):
+                            _LOGGER.info("Automatic fallback cast to %s succeeded!", alt_player.entity_id)
+                            return True
+        except Exception as alt_err:
+            _LOGGER.debug("Companion fallback cast error: %s", alt_err)
+
+        return False

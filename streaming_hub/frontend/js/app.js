@@ -254,16 +254,25 @@
   function renderPlayersSelect() {
     elements.deviceSelect.innerHTML = '<option value="browser">💻 Browser Locale (Web Player)</option>';
     if (state.mediaPlayers && state.mediaPlayers.length > 0) {
-      const group = document.createElement("optgroup");
-      group.label = "Home Assistant Media Players";
+      const castGroup = document.createElement("optgroup");
+      castGroup.label = "📺 Dispositivi Google Cast (Consigliati)";
+      const tvGroup = document.createElement("optgroup");
+      tvGroup.label = "🔊 Altri Player / Controllo TV";
+
       state.mediaPlayers.forEach((p) => {
         const opt = document.createElement("option");
         opt.value = p.entity_id;
-        const icon = p.is_cast ? "📺 Cast: " : "🔊 TV: ";
+        const icon = p.is_cast ? "📺 " : "🔊 ";
         opt.textContent = `${icon}${p.name} (${p.state})`;
-        group.appendChild(opt);
+        if (p.is_cast) {
+          castGroup.appendChild(opt);
+        } else {
+          tvGroup.appendChild(opt);
+        }
       });
-      elements.deviceSelect.appendChild(group);
+
+      if (castGroup.children.length > 0) elements.deviceSelect.appendChild(castGroup);
+      if (tvGroup.children.length > 0) elements.deviceSelect.appendChild(tvGroup);
     }
   }
 
@@ -653,6 +662,7 @@
     state.selectedItem = item;
     state.selectedSeason = 1;
     state.selectedEpisode = null;
+    state.selectedSource = null;
 
     const mediaType = item.type === "tv" || !!item.seasons ? "tv" : "movie";
 
@@ -790,6 +800,7 @@
       if (idx === 0) {
         state.selectedEpisode = ep;
         renderSources(ep.sources || []);
+        updatePlayButtonText();
       }
 
       card.innerHTML = `
@@ -802,6 +813,7 @@
         card.classList.add("active");
         state.selectedEpisode = ep;
         renderSources(ep.sources || []);
+        updatePlayButtonText();
       });
 
       elements.episodesList.appendChild(card);
@@ -832,12 +844,15 @@
   }
 
   function updatePlayButtonText() {
+    const isTv = state.selectedItem && (state.selectedItem.type === "tv" || !!state.selectedItem.seasons);
+    const epPrefix = isTv && state.selectedEpisode ? `S${state.selectedSeason}E${state.selectedEpisode.episode_number} ` : "";
+
     if (state.selectedDevice === "browser") {
-      elements.btnPlayText.textContent = "Guarda nel Browser";
+      elements.btnPlayText.textContent = `Guarda ${epPrefix}nel Browser`;
     } else {
       const dev = state.mediaPlayers.find((p) => p.entity_id === state.selectedDevice);
       const name = dev ? dev.name : "Dispositivo Cast";
-      elements.btnPlayText.textContent = `Trasmetti su ${name}`;
+      elements.btnPlayText.textContent = `Trasmetti ${epPrefix}su ${name}`;
     }
   }
 
@@ -846,13 +861,20 @@
     const item = state.selectedItem;
     if (!item) return;
 
-    // Determine target source
-    let source = state.selectedSource;
-    if (!source) {
-      if (item.sources && item.sources.length > 0) {
+    const isTv = item.type === "tv" || !!item.seasons;
+
+    // Determine target source: for TV series, ALWAYS use the active episode's sources
+    let source = null;
+    if (isTv && state.selectedEpisode) {
+      const epSources = state.selectedEpisode.sources || [];
+      if (epSources.length > 0) {
+        const match = epSources.find((s) => s.id === (state.selectedSource && state.selectedSource.id));
+        source = match || epSources[0];
+      }
+    } else {
+      source = state.selectedSource;
+      if (!source && item.sources && item.sources.length > 0) {
         source = item.sources[0];
-      } else if (state.selectedEpisode && state.selectedEpisode.sources && state.selectedEpisode.sources.length > 0) {
-        source = state.selectedEpisode.sources[0];
       }
     }
 
@@ -861,8 +883,8 @@
       return;
     }
 
-    const title = state.selectedEpisode
-      ? `${item.title} - S${state.selectedSeason}E${state.selectedEpisode.episode_number}`
+    const title = (isTv && state.selectedEpisode)
+      ? `${item.title} - S${state.selectedSeason}E${state.selectedEpisode.episode_number}${state.selectedEpisode.title ? ": " + state.selectedEpisode.title : ""}`
       : item.title;
 
     if (state.selectedDevice === "browser") {
