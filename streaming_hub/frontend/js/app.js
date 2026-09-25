@@ -254,25 +254,18 @@
   function renderPlayersSelect() {
     elements.deviceSelect.innerHTML = '<option value="browser">💻 Browser Locale (Web Player)</option>';
     if (state.mediaPlayers && state.mediaPlayers.length > 0) {
-      const castGroup = document.createElement("optgroup");
-      castGroup.label = "📺 Dispositivi Google Cast (Consigliati)";
-      const tvGroup = document.createElement("optgroup");
-      tvGroup.label = "🔊 Altri Player / Controllo TV";
+      const group = document.createElement("optgroup");
+      group.label = "📺 Schermi TV & Dispositivi Cast Disponibili";
 
       state.mediaPlayers.forEach((p) => {
         const opt = document.createElement("option");
         opt.value = p.entity_id;
-        const icon = p.is_cast ? "📺 " : "🔊 ";
-        opt.textContent = `${icon}${p.name} (${p.state})`;
-        if (p.is_cast) {
-          castGroup.appendChild(opt);
-        } else {
-          tvGroup.appendChild(opt);
-        }
+        const stateNote = p.state === "off" ? " (Standby)" : "";
+        opt.textContent = `📺 ${p.name}${stateNote}`;
+        group.appendChild(opt);
       });
 
-      if (castGroup.children.length > 0) elements.deviceSelect.appendChild(castGroup);
-      if (tvGroup.children.length > 0) elements.deviceSelect.appendChild(tvGroup);
+      elements.deviceSelect.appendChild(group);
     }
   }
 

@@ -148,35 +148,56 @@ class HACoreClient:
                 if any(spk in name_lower for spk in speaker_keywords):
                     continue
 
-                # Determine if it is a native Cast receiver or general TV control
-                is_google_cast = (
+                # Determine if it is a genuine video/stream receiver
+                is_stream_capable = (
                     "cast" in id_lower
                     or "chromecast" in id_lower
                     or "google" in id_lower
                     or "tpm" in id_lower
+                    or "shield" in id_lower
+                    or "mibox" in id_lower
+                    or "firetv" in id_lower
+                    or "appletv" in id_lower
+                    or "apple_tv" in id_lower
+                    or "kodi" in id_lower
+                    or "roku" in id_lower
                     or "app_id" in attrs
                     or "media_content_type" in attrs
+                    or attrs.get("app_name") is not None
                 )
 
-                label_suffix = " [Google Cast]" if is_google_cast else " [Controllo TV]"
-                display_name = f"{friendly_name}{label_suffix}"
+                # Strictly discard non-streaming TV remote controls (e.g. philips_tv, ambilight controls)
+                if not is_stream_capable:
+                    _LOGGER.debug("Skipping TV remote control entity: %s (%s)", entity_id, friendly_name)
+                    continue
 
                 players.append(
                     CastDeviceInfo(
                         entity_id=entity_id,
-                        name=display_name,
-                        is_cast=is_google_cast,
+                        name=friendly_name,
+                        is_cast=True,
                         state=current_state,
                         device_class=device_class,
                     )
                 )
 
-            # Prioritize native Google Cast devices first
-            players.sort(key=lambda p: (not p.is_cast, p.name))
+            # Deduplicate by friendly name (e.g. if multiple entities map to the same screen)
+            unique_players: dict[str, CastDeviceInfo] = {}
+            for p in players:
+                if p.name in unique_players:
+                    # Prefer explicit Cast / TPM chassis entity
+                    if any(k in p.entity_id.lower() for k in ("tpm", "cast", "chromecast")):
+                        unique_players[p.name] = p
+                else:
+                    unique_players[p.name] = p
+
+            final_players = list(unique_players.values())
+            final_players.sort(key=lambda p: p.name)
+            return final_players
         except Exception as err:
             _LOGGER.error("Failed to fetch media players from Home Assistant: %s", err)
 
-        return players
+        return []
 
     async def play_on_device(
         self,

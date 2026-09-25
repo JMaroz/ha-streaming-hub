@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.2
+
+### Novità & Correzioni
+- **Pulizia Dispositivi Cast & Rimozione Telecomandi TV**:
+  - Filtraggio rigoroso delle entità `media_player`: rimosse tutte le entità di solo controllo remoto / telecomando TV (es. `philips_tv`, entità ambilight o CEC puro) che non supportano lo streaming video e generavano errori 500.
+  - Vengono mantenuti unicamente i veri ricevitori di streaming e display abilitati (Google Cast, Chromecast, chassis TV Android/TPM, Shield, FireTV, AppleTV, Kodi, Roku).
+  - Deduplicazione automatica per nome del dispositivo: se la TV espone più entità, viene selezionata automaticamente l'entità chassis Cast effettiva (`tpm191e`, `cast`).
+  - Rimossa la confusione tra entità duplicate `(on)` e `(off)`: l'interfaccia mostra un unico selettore pulito con indicazione `(Standby)` per i dispositivi spenti, pronti ad essere svegliati dal comando Cast.
+
 ## 1.1.1
 
 ### Novità & Correzioni
