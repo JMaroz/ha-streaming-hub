@@ -175,7 +175,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Streaming Hub",
     description="Home Assistant App for media streaming, HLS proxying, and Cast control",
-    version="1.0.0",
+    version="1.1.0",
     lifespan=lifespan,
 )
 
@@ -249,7 +249,7 @@ async def get_status(request: Request) -> dict[str, Any]:
     return {
         "status": "online",
         "app_name": "Streaming Hub",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "ingress_path": ingress_path,
         "ha_host_ip": ha_host,
         "stream_port": CONFIG.get("stream_port", 8099),
