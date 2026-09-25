@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.2.0
+
+### Novità & Funzionalità
+- **Sezione "Continua a Guardare" (Home Shelf)**:
+  - Nuova sezione orizzontale in cima alla home page per film e serie TV interrotte.
+  - Barra di avanzamento grafica al fondo della locandina, minutaggio rimanente e badge dinamico puntata (es. `S3:E3`).
+  - Pulsante rapido di eliminazione `✕` per rimuovere un contenuto dalla cronologia.
+- **Ripresa Intelligente Serie TV**:
+  - Quando si apre una serie TV interrotta, l'app seleziona e apre automaticamente la stagione e la puntata corretta (es. Stagione 3, Episodio 3).
+  - Tasto dinamico: **▶ Riprendi da mm:ss** per riprendere istantaneamente dal secondo esatto, con pulsante secondario **↺ Dall'inizio** per ripartire da zero.
+  - Logica **Prossimo Episodio**: se un episodio è stato visto per oltre il 90%, la card continua a guardare propone automaticamente la puntata successiva (es. `Prossimo: S3:E4`).
+- **Sincronizzazione Riproduzione Cast**:
+  - Introdotto `CastTracker` in background su Home Assistant che interroga periodicamente l'entità TV (`media_position`, `media_duration`, `state`) salvando l'avanzamento su database SQLite anche a browser chiuso.
+  - Supporto al comando di `media_seek` automatico all'avvio del Cast quando si riprende un contenuto interrotto.
+- **Perfezionamento & Salvataggio TheMovieDB (TMDb)**:
+  - Risolto il mancato salvataggio degli identificativi `tmdb_id` e `imdb_id` nel database.
+  - Assegnazione prioritaria a locandine e sfondi ufficiali HD di TMDb rispetto ai thumbnail compressi dei siti di streaming.
+  - Arricchimento puntate TV: interrogate le API TMDb per stagione per assegnare i titoli italiani effettivi, trame e still image per ogni singolo episodio.
+  - Stato di configurazione TMDb esposto in `/api/status` e nelle impostazioni.
+
 ## 1.1.2
 
 ### Novità & Correzioni

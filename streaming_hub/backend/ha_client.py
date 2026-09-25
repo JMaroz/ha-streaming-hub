@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import Any
@@ -25,6 +26,7 @@ class HACoreClient:
         self.token = token or os.getenv("SUPERVISOR_TOKEN", "")
         self.base_url = base_url.rstrip("/")
         self._cached_host_ip: str | None = None
+        self._cast_trackers: dict[str, asyncio.Task] = {}
 
     @property
     def is_available(self) -> bool:
@@ -275,3 +277,144 @@ class HACoreClient:
             _LOGGER.debug("Companion fallback cast error: %s", alt_err)
 
         return False
+
+    async def get_entity_state(self, entity_id: str) -> dict[str, Any] | None:
+        """Fetch current state and attributes of a Home Assistant entity."""
+        if not self.is_available:
+            return None
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{self.base_url}/states/{entity_id}",
+                    headers=self._get_headers(),
+                    timeout=aiohttp.ClientTimeout(total=5),
+                ) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+        except Exception as err:
+            _LOGGER.debug("Could not fetch state for %s: %s", entity_id, err)
+        return None
+
+    async def seek_media(self, entity_id: str, position_seconds: float) -> bool:
+        """Send media_seek command to Home Assistant entity."""
+        if not self.is_available:
+            return False
+        payload = {
+            "entity_id": entity_id,
+            "seek_position": float(position_seconds),
+        }
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{self.base_url}/services/media_player/media_seek",
+                    headers=self._get_headers(),
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=8),
+                ) as resp:
+                    return resp.status in (200, 201)
+        except Exception as err:
+            _LOGGER.debug("Error seeking on %s to %s: %s", entity_id, position_seconds, err)
+            return False
+
+    def start_cast_tracker(
+        self,
+        entity_id: str,
+        media_id: str,
+        title: str,
+        media_type: str,
+        poster_url: str | None,
+        season_number: int | None,
+        episode_number: int | None,
+        db: Any,
+        seek_position: float = 0,
+    ) -> None:
+        """Start background task to sync watch progress while playing on Cast device."""
+        if entity_id in self._cast_trackers:
+            self._cast_trackers[entity_id].cancel()
+
+        task = asyncio.create_task(
+            self._track_cast_playback(
+                entity_id,
+                media_id,
+                title,
+                media_type,
+                poster_url,
+                season_number,
+                episode_number,
+                db,
+                seek_position,
+            )
+        )
+        self._cast_trackers[entity_id] = task
+
+    async def _track_cast_playback(
+        self,
+        entity_id: str,
+        media_id: str,
+        title: str,
+        media_type: str,
+        poster_url: str | None,
+        season_number: int | None,
+        episode_number: int | None,
+        db: Any,
+        seek_position: float,
+    ) -> None:
+        """Poll entity state and sync watch progress with SQLite database."""
+        _LOGGER.info("Starting Cast watch progress tracker for %s on %s", title, entity_id)
+        seek_done = seek_position <= 5
+        idle_counter = 0
+
+        # Wait initial 4 seconds for Cast receiver launch
+        await asyncio.sleep(4)
+
+        try:
+            while True:
+                await asyncio.sleep(5)
+                state_data = await self.get_entity_state(entity_id)
+                if not state_data:
+                    idle_counter += 1
+                    if idle_counter > 10:
+                        break
+                    continue
+
+                state = state_data.get("state", "idle").lower()
+                attrs = state_data.get("attributes", {})
+
+                # If we need to seek to a resumed position, wait until state is playing
+                if not seek_done and state == "playing":
+                    _LOGGER.info("Seeking %s to resumed position %s seconds", entity_id, seek_position)
+                    await self.seek_media(entity_id, seek_position)
+                    seek_done = True
+                    await asyncio.sleep(1)
+                    continue
+
+                if state in ("playing", "paused"):
+                    idle_counter = 0
+                    pos = attrs.get("media_position")
+                    dur = attrs.get("media_duration")
+                    if pos is not None and float(pos) > 0:
+                        await db.save_watch_progress(
+                            media_id=media_id,
+                            title=title,
+                            media_type=media_type,
+                            poster_url=poster_url,
+                            season_number=season_number,
+                            episode_number=episode_number,
+                            progress_seconds=float(pos),
+                            duration_seconds=float(dur or 0),
+                        )
+                elif state in ("off", "idle", "standby"):
+                    idle_counter += 1
+                    if idle_counter >= 3:
+                        _LOGGER.info("Cast device %s is %s, stopping tracker.", entity_id, state)
+                        break
+                else:
+                    idle_counter += 1
+                    if idle_counter >= 6:
+                        break
+        except asyncio.CancelledError:
+            _LOGGER.debug("Cast tracker cancelled for %s", entity_id)
+        except Exception as err:
+            _LOGGER.warning("Error in Cast tracker for %s: %s", entity_id, err)
+        finally:
+            self._cast_trackers.pop(entity_id, None)

@@ -21,10 +21,15 @@
     mediaPlayers: [],
     hls: null,
     ingressPath: "",
+    resumeProgress: null,
   };
 
   // DOM Elements
   const elements = {
+    continueSection: document.getElementById("continue-section"),
+    continueRow: document.getElementById("continue-row"),
+    continueCount: document.getElementById("continue-count"),
+    btnRestartTrigger: document.getElementById("btn-restart-trigger"),
     brandLogo: document.getElementById("brand-logo"),
     navTabs: document.querySelectorAll(".nav-tab[data-type]"),
     btnGenresToggle: document.getElementById("btn-genres-toggle"),
@@ -105,6 +110,7 @@
     loadPlayers();
     loadGenres();
     await loadSources();
+    loadContinueWatching();
     loadCatalog();
   }
 
@@ -200,6 +206,16 @@
 
     // Play Button Trigger
     elements.btnPlayTrigger.addEventListener("click", handlePlayAction);
+
+    // Restart Button Trigger (from 0:00)
+    if (elements.btnRestartTrigger) {
+      elements.btnRestartTrigger.addEventListener("click", () => {
+        state.resumeProgress = null;
+        elements.btnRestartTrigger.classList.add("hidden");
+        updatePlayButtonText();
+        handlePlayAction();
+      });
+    }
 
     // Device Select Change
     elements.deviceSelect.addEventListener("change", (e) => {
@@ -650,12 +666,135 @@
     elements.heroSection.classList.remove("hidden");
   }
 
+  // Helper: Format seconds to M:SS or H:MM:SS
+  function formatTime(seconds) {
+    if (!seconds || isNaN(seconds)) return "0:00";
+    const s = Math.floor(seconds);
+    const m = Math.floor(s / 60);
+    const remS = s % 60;
+    const h = Math.floor(m / 60);
+    const remM = m % 60;
+    const pad = (n) => String(n).padStart(2, "0");
+    if (h > 0) {
+      return `${h}:${pad(remM)}:${pad(remS)}`;
+    }
+    return `${remM}:${pad(remS)}`;
+  }
+
+  // Continue Watching Section
+  async function loadContinueWatching() {
+    try {
+      const resp = await fetch(apiUrl("api/history/continue"));
+      if (!resp.ok) return;
+      const items = await resp.json();
+      renderContinueWatching(items);
+    } catch (err) {
+      console.warn("Could not load continue watching list:", err);
+    }
+  }
+
+  function renderContinueWatching(items) {
+    if (!elements.continueSection || !elements.continueRow) return;
+    elements.continueRow.innerHTML = "";
+
+    if (!items || items.length === 0) {
+      elements.continueSection.classList.add("hidden");
+      return;
+    }
+
+    elements.continueSection.classList.remove("hidden");
+    if (elements.continueCount) {
+      elements.continueCount.textContent = `${items.length} in corso`;
+    }
+
+    items.forEach((item) => {
+      const card = document.createElement("div");
+      card.className = "continue-card";
+
+      const imgSrc = item.backdrop_url || item.poster_url || "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=500&auto=format&fit=crop&q=60";
+      const isTv = item.media_type === "tv";
+
+      let epBadgeText = "";
+      if (isTv) {
+        if (item.is_next_episode) {
+          epBadgeText = `Prossimo: S${item.season_number}E${item.episode_number}`;
+        } else {
+          epBadgeText = `S${item.season_number}E${item.episode_number}`;
+        }
+      }
+
+      let timeText = "";
+      if (item.is_next_episode) {
+        timeText = "Da iniziare";
+      } else if (item.remaining_seconds > 0) {
+        const remMin = Math.round(item.remaining_seconds / 60);
+        timeText = remMin > 0 ? `${remMin} min rimanenti` : "Quasi terminato";
+      } else {
+        timeText = `${Math.round(item.progress_percent)}% completato`;
+      }
+
+      card.innerHTML = `
+        <div class="continue-media-wrap">
+          <img class="continue-media-img" src="${imgSrc}" alt="${escapeHtml(item.title)}" loading="lazy">
+          <div class="continue-play-overlay">
+            <div class="continue-play-icon">
+              <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            </div>
+          </div>
+          ${!item.is_next_episode ? `
+            <div class="continue-progress-container">
+              <div class="continue-progress-fill" style="width: ${Math.min(100, Math.max(0, item.progress_percent))}%;"></div>
+            </div>
+          ` : ""}
+          <button class="continue-remove-btn" title="Rimuovi da Continua a guardare">✕</button>
+        </div>
+        <div class="continue-info">
+          <div class="continue-title" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</div>
+          <div class="continue-subtitle">
+            ${epBadgeText ? `<span class="continue-ep-badge">${epBadgeText}</span>` : `<span>Film</span>`}
+            <span>${timeText}</span>
+          </div>
+        </div>
+      `;
+
+      // Remove button click
+      const removeBtn = card.querySelector(".continue-remove-btn");
+      removeBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        card.style.opacity = "0.3";
+        card.style.transform = "scale(0.95)";
+        try {
+          await fetch(apiUrl(`api/history/${encodeURIComponent(item.media_id)}`), { method: "DELETE" });
+          loadContinueWatching();
+          showToast(`"${item.title}" rimosso da Continua a guardare`, "info");
+        } catch (err) {
+          console.warn("Delete history error:", err);
+        }
+      });
+
+      // Card click: open modal with pre-selected season and episode
+      card.addEventListener("click", () => {
+        const dummyItem = {
+          id: item.media_id,
+          title: item.title,
+          type: item.media_type,
+          poster_url: item.poster_url,
+          backdrop_url: item.backdrop_url,
+        };
+        openDetails(dummyItem, item.season_number, item.episode_number);
+      });
+
+      elements.continueRow.appendChild(card);
+    });
+  }
+
   // Open Details Modal
-  async function openDetails(item) {
+  async function openDetails(item, targetSeason = null, targetEpisode = null) {
     state.selectedItem = item;
-    state.selectedSeason = 1;
+    state.selectedSeason = targetSeason || 1;
     state.selectedEpisode = null;
     state.selectedSource = null;
+    state.resumeProgress = null;
 
     const mediaType = item.type === "tv" || !!item.seasons ? "tv" : "movie";
 
@@ -685,21 +824,37 @@
     elements.detailsModal.classList.remove("hidden");
     document.body.style.overflow = "hidden";
 
-    // Fetch full enriched details from backend
+    // Fetch full enriched details and watch progress concurrently
     try {
-      const resp = await fetch(apiUrl(`api/catalog/title/${mediaType}/${item.id}`));
-      if (resp.ok) {
-        const detailed = await resp.json();
+      const [detailsResp, progResp] = await Promise.all([
+        fetch(apiUrl(`api/catalog/title/${mediaType}/${item.id}`)),
+        fetch(apiUrl(`api/history/progress/${item.id}`)),
+      ]);
+
+      if (progResp.ok) {
+        const progData = await progResp.json();
+        if (progData.progress) {
+          state.resumeProgress = progData.progress;
+          if (mediaType === "tv" && !targetSeason && progData.progress.season_number) {
+            state.selectedSeason = progData.progress.season_number;
+          }
+        }
+      }
+
+      if (detailsResp.ok) {
+        const detailed = await detailsResp.json();
         state.selectedItem = detailed;
-        updateModalWithDetails(detailed);
+        updateModalWithDetails(detailed, targetEpisode || (state.resumeProgress && state.resumeProgress.episode_number));
+      } else {
+        updateModalWithDetails(item, targetEpisode);
       }
     } catch (err) {
       console.warn("Could not enrich item details:", err);
-      updateModalWithDetails(item);
+      updateModalWithDetails(item, targetEpisode);
     }
   }
 
-  function updateModalWithDetails(item) {
+  function updateModalWithDetails(item, targetEpisode = null) {
     if (item.description) elements.modalPlot.textContent = item.description;
     if (item.backdrop_url) elements.modalBackdropImg.style.backgroundImage = `url("${item.backdrop_url}")`;
     if (item.duration) elements.modalDuration.textContent = `${item.duration} min`;
@@ -717,7 +872,7 @@
     const isTv = item.type === "tv" || (item.seasons && item.seasons.length > 0);
     if (isTv) {
       elements.tvSeriesSection.classList.remove("hidden");
-      renderSeasons(item.seasons || []);
+      renderSeasons(item.seasons || [], state.selectedSeason, targetEpisode);
     } else {
       elements.tvSeriesSection.classList.add("hidden");
       renderSources(item.sources || []);
@@ -727,16 +882,19 @@
   }
 
   // Render TV Seasons & Episodes
-  function renderSeasons(seasons) {
+  function renderSeasons(seasons, targetSeason = 1, targetEpisode = null) {
     elements.seasonsTabs.innerHTML = "";
     if (!seasons || seasons.length === 0) {
       elements.episodesList.innerHTML = "<p class='empty-state-text'>Nessuna stagione trovata.</p>";
       return;
     }
 
-    seasons.forEach((season, idx) => {
+    const activeSeasonObj = seasons.find((s) => s.number === targetSeason) || seasons[0];
+    state.selectedSeason = activeSeasonObj.number;
+
+    seasons.forEach((season) => {
       const btn = document.createElement("button");
-      btn.className = `season-btn ${idx === 0 ? "active" : ""}`;
+      btn.className = `season-btn ${season.number === state.selectedSeason ? "active" : ""}`;
       btn.textContent = `Stagione ${season.number}`;
       btn.addEventListener("click", () => {
         elements.seasonsTabs.querySelectorAll(".season-btn").forEach((b) => b.classList.remove("active"));
@@ -747,13 +905,12 @@
       elements.seasonsTabs.appendChild(btn);
     });
 
-    state.selectedSeason = seasons[0].number;
-    activateSeason(seasons[0]);
+    activateSeason(activeSeasonObj, targetEpisode);
   }
 
-  async function activateSeason(season) {
+  async function activateSeason(season, targetEpisode = null) {
     if (season.episodes && season.episodes.length > 0) {
-      renderEpisodes(season.episodes);
+      renderEpisodes(season.episodes, targetEpisode);
       return;
     }
 
@@ -770,7 +927,7 @@
       if (resp.ok) {
         const data = await resp.json();
         season.episodes = data.episodes || [];
-        renderEpisodes(season.episodes);
+        renderEpisodes(season.episodes, targetEpisode);
       } else {
         elements.episodesList.innerHTML = "<p class='empty-state-text'>Nessun episodio caricato per questa stagione.</p>";
       }
@@ -780,21 +937,27 @@
     }
   }
 
-  function renderEpisodes(episodes) {
+  function renderEpisodes(episodes, targetEpisode = null) {
     elements.episodesList.innerHTML = "";
     if (!episodes || episodes.length === 0) {
       elements.episodesList.innerHTML = "<p>Nessun episodio caricato per questa stagione.</p>";
       return;
     }
 
-    episodes.forEach((ep, idx) => {
+    let defaultEp = episodes[0];
+    if (targetEpisode) {
+      const found = episodes.find((e) => e.episode_number === targetEpisode);
+      if (found) defaultEp = found;
+    }
+
+    state.selectedEpisode = defaultEp;
+    renderSources(defaultEp.sources || []);
+    updatePlayButtonText();
+
+    episodes.forEach((ep) => {
+      const isSelected = ep.episode_number === state.selectedEpisode.episode_number;
       const card = document.createElement("div");
-      card.className = `episode-card ${idx === 0 ? "active" : ""}`;
-      if (idx === 0) {
-        state.selectedEpisode = ep;
-        renderSources(ep.sources || []);
-        updatePlayButtonText();
-      }
+      card.className = `episode-card ${isSelected ? "active" : ""}`;
 
       card.innerHTML = `
         <div class="ep-number">${ep.episode_number}</div>
@@ -840,12 +1003,27 @@
     const isTv = state.selectedItem && (state.selectedItem.type === "tv" || !!state.selectedItem.seasons);
     const epPrefix = isTv && state.selectedEpisode ? `S${state.selectedSeason}E${state.selectedEpisode.episode_number} ` : "";
 
+    const hasResume = state.resumeProgress && state.resumeProgress.progress_seconds > 15;
+    const resumeTimeStr = hasResume ? `da ${formatTime(state.resumeProgress.progress_seconds)}` : "";
+
+    if (elements.btnRestartTrigger) {
+      elements.btnRestartTrigger.classList.toggle("hidden", !hasResume);
+    }
+
     if (state.selectedDevice === "browser") {
-      elements.btnPlayText.textContent = `Guarda ${epPrefix}nel Browser`;
+      if (hasResume) {
+        elements.btnPlayText.textContent = `▶ Riprendi ${epPrefix}${resumeTimeStr}`;
+      } else {
+        elements.btnPlayText.textContent = `Guarda ${epPrefix}nel Browser`;
+      }
     } else {
       const dev = state.mediaPlayers.find((p) => p.entity_id === state.selectedDevice);
       const name = dev ? dev.name : "Dispositivo Cast";
-      elements.btnPlayText.textContent = `Trasmetti ${epPrefix}su ${name}`;
+      if (hasResume) {
+        elements.btnPlayText.textContent = `📺 Riprendi ${epPrefix}${resumeTimeStr} su ${name}`;
+      } else {
+        elements.btnPlayText.textContent = `Trasmetti ${epPrefix}su ${name}`;
+      }
     }
   }
 
@@ -931,14 +1109,21 @@
     elements.btnPlayTrigger.disabled = true;
 
     try {
+      const isTv = state.selectedItem && (state.selectedItem.type === "tv" || !!state.selectedItem.seasons);
+      const hasResume = state.resumeProgress && state.resumeProgress.progress_seconds > 15;
+
       const payload = {
         entity_id: entityId,
         page_url: source.page_url,
         title: title,
         poster_url: state.selectedItem.backdrop_url || state.selectedItem.poster_url,
         provider_id: source.provider_id,
-        media_id: source.media_id,
+        media_id: state.selectedItem ? state.selectedItem.id : source.media_id,
         quality: source.quality,
+        media_type: isTv ? "tv" : "movie",
+        season_number: isTv ? state.selectedSeason : null,
+        episode_number: (isTv && state.selectedEpisode) ? state.selectedEpisode.episode_number : null,
+        seek_seconds: hasResume ? state.resumeProgress.progress_seconds : 0,
       };
 
       const resp = await fetch(apiUrl("api/cast"), {
@@ -954,6 +1139,7 @@
 
       showToast(`Riproduzione avviata con successo su ${entityId}!`, "success");
       closeModal();
+      setTimeout(loadContinueWatching, 3000);
     } catch (err) {
       console.error("Cast error:", err);
       showToast(err.message || "Errore durante il casting", "error");
@@ -969,6 +1155,8 @@
     elements.playerSpinner.classList.remove("hidden");
 
     const video = elements.videoElement;
+    const hasResume = state.resumeProgress && state.resumeProgress.progress_seconds > 15;
+    const seekSec = hasResume ? state.resumeProgress.progress_seconds : 0;
 
     if (window.Hls && Hls.isSupported()) {
       if (state.hls) {
@@ -984,6 +1172,9 @@
 
       state.hls.on(Hls.Events.MANIFEST_PARSED, () => {
         elements.playerSpinner.classList.add("hidden");
+        if (seekSec > 0) {
+          video.currentTime = seekSec;
+        }
         video.play().catch((e) => console.log("Autoplay blocked:", e));
       });
 
@@ -1008,33 +1199,40 @@
       video.src = streamUrl;
       video.addEventListener("loadedmetadata", () => {
         elements.playerSpinner.classList.add("hidden");
+        if (seekSec > 0) {
+          video.currentTime = seekSec;
+        }
         video.play();
       });
     } else {
       video.src = streamUrl;
+      if (seekSec > 0) {
+        video.currentTime = seekSec;
+      }
       video.play();
     }
 
-    video.ontimeupdate = reportWatchProgress;
-    video.onpause = reportWatchProgress;
-    video.onended = reportWatchProgress;
+    video.ontimeupdate = () => reportWatchProgress(false);
+    video.onpause = () => reportWatchProgress(true);
+    video.onended = () => reportWatchProgress(true);
   }
 
   let lastProgressReportTime = 0;
-  function reportWatchProgress() {
+  function reportWatchProgress(force = false) {
     const video = elements.videoElement;
     if (!video || !state.selectedItem || !video.currentTime) return;
     const now = Date.now();
-    if (now - lastProgressReportTime < 10000) return;
+    if (!force && now - lastProgressReportTime < 5000) return;
     lastProgressReportTime = now;
 
+    const isTv = state.selectedItem.type === "tv" || !!state.selectedItem.seasons;
     const payload = {
       media_id: state.selectedItem.id,
-      title: elements.playerTitle.textContent || state.selectedItem.title,
-      media_type: state.selectedItem.type === "tv" || state.selectedItem.seasons ? "tv" : "movie",
+      title: state.selectedItem.title,
+      media_type: isTv ? "tv" : "movie",
       poster_url: state.selectedItem.poster_url,
-      season_number: state.selectedSeason || null,
-      episode_number: state.selectedEpisode ? state.selectedEpisode.episode_number : null,
+      season_number: isTv ? state.selectedSeason : null,
+      episode_number: (isTv && state.selectedEpisode) ? state.selectedEpisode.episode_number : null,
       progress_seconds: video.currentTime,
       duration_seconds: video.duration || 0,
     };
@@ -1069,7 +1267,7 @@
   }
 
   function closePlayer() {
-    reportWatchProgress();
+    reportWatchProgress(true);
     if (elements.videoElement) {
       elements.videoElement.ontimeupdate = null;
       elements.videoElement.onpause = null;
@@ -1090,6 +1288,7 @@
     elements.videoElement.removeAttribute("src");
     elements.videoElement.load();
     elements.playerModal.classList.add("hidden");
+    loadContinueWatching();
   }
 
   function closeModal() {

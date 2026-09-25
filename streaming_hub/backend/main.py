@@ -175,7 +175,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Streaming Hub",
     description="Home Assistant App for media streaming, HLS proxying, and Cast control",
-    version="1.1.2",
+    version="1.2.0",
     lifespan=lifespan,
 )
 
@@ -205,6 +205,10 @@ class CastRequest(BaseModel):
     provider_id: str | None = None
     media_id: str | None = None
     quality: str | None = None
+    media_type: str = "movie"
+    season_number: int | None = None
+    episode_number: int | None = None
+    seek_seconds: float = 0
 
 
 class TestSourceRequest(BaseModel):
@@ -249,13 +253,14 @@ async def get_status(request: Request) -> dict[str, Any]:
     return {
         "status": "online",
         "app_name": "Streaming Hub",
-        "version": "1.1.2",
+        "version": "1.2.0",
         "ingress_path": ingress_path,
         "ha_host_ip": ha_host,
         "stream_port": CONFIG.get("stream_port", 8099),
         "supervisor_connected": ha_client.is_available,
         "sources": source_manager.list_sources(),
         "dns_mode": CONFIG.get("custom_dns"),
+        "tmdb_configured": bool(metadata_enricher.tmdb_api_key),
         "active_stream_sessions": len(stream_proxy._sessions),
     }
 
@@ -392,6 +397,11 @@ async def get_season_episodes(series_id: str, season_number: int) -> dict[str, A
     try:
         season = await source_manager.get_season(series_id, season_number)
         if season and season.episodes:
+            # Enrich season episodes with TMDb if tmdb_id is available
+            title_data = await db.get_title(series_id)
+            tmdb_id = title_data.get("tmdb_id") if title_data else None
+            if tmdb_id:
+                await metadata_enricher.enrich_tv_season(tmdb_id, season)
             await db.save_season(series_id, season)
         return season.to_dict()
     except Exception as err:
@@ -419,6 +429,26 @@ async def save_progress(req: ProgressRequest) -> dict[str, Any]:
 async def get_history(limit: int = Query(30, ge=1, le=100)) -> list[dict[str, Any]]:
     """Retrieve user watch history from SQLite database."""
     return await db.get_watch_history(limit=limit)
+
+
+@app.get("/api/history/continue")
+async def get_continue_watching(limit: int = Query(20, ge=1, le=50)) -> list[dict[str, Any]]:
+    """Retrieve curated continue watching list for home shelf."""
+    return await db.get_continue_watching(limit=limit)
+
+
+@app.delete("/api/history/{media_id}")
+async def delete_history_item(media_id: str) -> dict[str, Any]:
+    """Remove a media title from watch history."""
+    await db.delete_watch_history(media_id)
+    return {"status": "ok", "deleted": media_id}
+
+
+@app.get("/api/history/progress/{media_id}")
+async def get_media_progress(media_id: str) -> dict[str, Any]:
+    """Get latest watch progress for a title."""
+    progress = await db.get_media_progress(media_id)
+    return {"status": "ok", "progress": progress}
 
 
 @app.post("/api/favorites/toggle")
@@ -522,6 +552,19 @@ async def cast_to_device(req: CastRequest) -> dict[str, Any]:
             status_code=500,
             detail=f"Home Assistant non è riuscito ad avviare la riproduzione su {req.entity_id}",
         )
+
+    # Start active tracker to sync watch progress from Home Assistant Cast entity
+    ha_client.start_cast_tracker(
+        entity_id=req.entity_id,
+        media_id=req.media_id or "media",
+        title=req.title,
+        media_type=req.media_type,
+        poster_url=req.poster_url,
+        season_number=req.season_number,
+        episode_number=req.episode_number,
+        db=db,
+        seek_position=req.seek_seconds,
+    )
 
     return {
         "success": True,

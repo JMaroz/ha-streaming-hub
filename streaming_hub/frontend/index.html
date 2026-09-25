@@ -94,6 +94,21 @@
         </div>
       </section>
 
+      <!-- Continue Watching Section -->
+      <section id="continue-section" class="continue-section hidden">
+        <div class="section-header">
+          <div class="header-left">
+            <h2 class="section-title">
+              <span class="section-icon">⏯️</span> Continua a Guardare
+            </h2>
+          </div>
+          <span id="continue-count" class="section-count"></span>
+        </div>
+        <div id="continue-row" class="continue-row">
+          <!-- Populated dynamically -->
+        </div>
+      </section>
+
       <!-- Catalog Section -->
       <section class="catalog-section">
         <div class="section-header">
@@ -206,10 +221,16 @@
               </div>
             </div>
 
-            <button id="btn-play-trigger" class="btn btn-primary btn-large">
-              <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-              <span id="btn-play-text">Avvia Riproduzione</span>
-            </button>
+            <div class="play-actions-row">
+              <button id="btn-play-trigger" class="btn btn-primary btn-large">
+                <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                <span id="btn-play-text">Avvia Riproduzione</span>
+              </button>
+              <button id="btn-restart-trigger" class="btn btn-secondary hidden" title="Ricomincia dal primo secondo">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                <span>Dall'inizio</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>

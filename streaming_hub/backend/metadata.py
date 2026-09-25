@@ -239,21 +239,28 @@ class MetadataEnricher:
 
     def _apply_movie_metadata(self, movie: Movie, meta: dict[str, Any]) -> None:
         """Apply enriched metadata to Movie object."""
-        if meta.get("overview") and not movie.description:
+        if meta.get("id"):
+            with contextlib.suppress(Exception):
+                movie.tmdb_id = int(meta["id"])
+        if meta.get("imdb_id"):
+            movie.imdb_id = str(meta["imdb_id"])
+
+        if meta.get("overview"):
             movie.description = meta["overview"]
-        if meta.get("poster_path") and not movie.poster_url:
+
+        if meta.get("poster_path"):
             movie.poster_url = f"{TMDB_IMAGE_BASE}{meta['poster_path']}"
         elif meta.get("poster") and not movie.poster_url:
             movie.poster_url = meta["poster"]
         elif meta.get("poster_url") and not movie.poster_url:
             movie.poster_url = meta["poster_url"]
 
-        if meta.get("backdrop_path") and not movie.backdrop_url:
+        if meta.get("backdrop_path"):
             movie.backdrop_url = f"{TMDB_BACKDROP_BASE}{meta['backdrop_path']}"
         elif meta.get("background") and not movie.backdrop_url:
             movie.backdrop_url = meta["background"]
 
-        if meta.get("vote_average") and not movie.rating:
+        if meta.get("vote_average"):
             with contextlib.suppress(Exception):
                 movie.rating = round(float(meta["vote_average"]), 1)
         elif meta.get("imdbRating") and not movie.rating:
@@ -263,7 +270,7 @@ class MetadataEnricher:
         if meta.get("runtime") and not movie.duration:
             movie.duration = int(meta["runtime"])
 
-        if meta.get("genres") and not movie.genres:
+        if meta.get("genres"):
             genres = []
             for g in meta["genres"]:
                 if isinstance(g, dict) and "name" in g:
@@ -286,28 +293,35 @@ class MetadataEnricher:
 
     def _apply_tv_metadata(self, series: TvSeries, meta: dict[str, Any]) -> None:
         """Apply enriched metadata to TvSeries object."""
-        if meta.get("overview") and not series.description:
+        if meta.get("id"):
+            with contextlib.suppress(Exception):
+                series.tmdb_id = int(meta["id"])
+        if meta.get("imdb_id"):
+            series.imdb_id = str(meta["imdb_id"])
+
+        if meta.get("overview"):
             series.description = meta["overview"]
-        if meta.get("poster_path") and not series.poster_url:
+
+        if meta.get("poster_path"):
             series.poster_url = f"{TMDB_IMAGE_BASE}{meta['poster_path']}"
         elif meta.get("poster") and not series.poster_url:
             series.poster_url = meta["poster"]
         elif meta.get("poster_url") and not series.poster_url:
             series.poster_url = meta["poster_url"]
 
-        if meta.get("backdrop_path") and not series.backdrop_url:
+        if meta.get("backdrop_path"):
             series.backdrop_url = f"{TMDB_BACKDROP_BASE}{meta['backdrop_path']}"
         elif meta.get("background") and not series.backdrop_url:
             series.backdrop_url = meta["background"]
 
-        if meta.get("vote_average") and not series.rating:
+        if meta.get("vote_average"):
             with contextlib.suppress(Exception):
                 series.rating = round(float(meta["vote_average"]), 1)
         elif meta.get("imdbRating") and not series.rating:
             with contextlib.suppress(Exception):
                 series.rating = round(float(meta["imdbRating"]), 1)
 
-        if meta.get("genres") and not series.genres:
+        if meta.get("genres"):
             genres = []
             for g in meta["genres"]:
                 if isinstance(g, dict) and "name" in g:
@@ -316,3 +330,36 @@ class MetadataEnricher:
                     genres.append(g)
             if genres:
                 series.genres = genres
+
+    async def enrich_tv_season(self, series_tmdb_id: int | None, season: Any) -> Any:
+        """Enrich TV season episodes with TMDb episode titles, overviews, and screenshots."""
+        if not self.tmdb_api_key or not series_tmdb_id:
+            return season
+
+        auth_headers, auth_params = self._get_tmdb_auth()
+        season_url = f"{TMDB_BASE_URL}/tv/{series_tmdb_id}/season/{season.number}"
+        params = {"language": "it-IT", **auth_params}
+        try:
+            data = await self._get_json(season_url, params=params, headers=auth_headers)
+            if not data or "episodes" not in data:
+                return season
+
+            tmdb_eps = {e["episode_number"]: e for e in data["episodes"] if "episode_number" in e}
+            for ep in season.episodes:
+                t_ep = tmdb_eps.get(ep.episode_number)
+                if not t_ep:
+                    continue
+                ep_name = (t_ep.get("name") or "").strip()
+                if ep_name:
+                    if not ep.title or ep.title.lower().startswith("episodio"):
+                        ep.title = f"Episodio {ep.episode_number}: {ep_name}"
+                    else:
+                        ep.title = f"{ep.title} - {ep_name}"
+                if t_ep.get("overview") and not ep.description:
+                    ep.description = t_ep["overview"]
+                if t_ep.get("still_path") and not ep.poster_url:
+                    ep.poster_url = f"{TMDB_IMAGE_BASE}{t_ep['still_path']}"
+        except Exception as err:
+            _LOGGER.debug("TMDb enrich season %s failed: %s", season.number, err)
+
+        return season

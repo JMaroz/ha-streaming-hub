@@ -7,6 +7,7 @@ watch history, and user favorites persistently in /data/streaming_hub.db.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from datetime import UTC, datetime
 import json
 import logging
@@ -356,6 +357,191 @@ class MediaDatabase:
                 (limit,),
             )
             return [dict(row) for row in cursor.fetchall()]
+
+    async def get_continue_watching(self, limit: int = 20) -> list[dict[str, Any]]:
+        """Retrieve deduplicated in-progress movies and TV series for 'Continua a guardare'."""
+        async with self._lock:
+            return await asyncio.to_thread(self._get_continue_watching_sync, limit)
+
+    def _get_continue_watching_sync(self, limit: int) -> list[dict[str, Any]]:
+        """Synchronously get continue watching list."""
+        with self._get_connection() as conn:
+            query = """
+                SELECT h.id, h.media_id, h.title, h.poster_url, h.media_type,
+                       h.season_number, h.episode_number, h.progress_seconds,
+                       h.duration_seconds, h.updated_at,
+                       t.backdrop_url, t.poster_url as title_poster, t.title as title_canonical
+                FROM watch_history h
+                INNER JOIN (
+                    SELECT media_id, MAX(updated_at) as max_updated
+                    FROM watch_history
+                    GROUP BY media_id
+                ) latest ON h.media_id = latest.media_id AND h.updated_at = latest.max_updated
+                LEFT JOIN titles t ON h.media_id = t.id
+                ORDER BY h.updated_at DESC
+                LIMIT ?;
+            """
+            cursor = conn.execute(query, (limit * 2,))
+            rows = [dict(r) for r in cursor.fetchall()]
+
+            results: list[dict[str, Any]] = []
+            for r in rows:
+                media_type = r.get("media_type", "movie")
+                duration = float(r.get("duration_seconds") or 0)
+                progress = float(r.get("progress_seconds") or 0)
+                percent = round((progress / duration * 100), 1) if duration > 0 else 0
+                title_name = r.get("title_canonical") or r.get("title") or "Senza Titolo"
+                poster = r.get("title_poster") or r.get("poster_url")
+                backdrop = r.get("backdrop_url")
+
+                if media_type == "movie":
+                    if progress < 15:
+                        continue
+                    if percent >= 90 or (duration > 300 and (duration - progress) < 180):
+                        continue
+
+                    remaining = max(0, int(duration - progress)) if duration > 0 else 0
+                    results.append({
+                        "media_id": r["media_id"],
+                        "title": title_name,
+                        "media_type": "movie",
+                        "poster_url": poster,
+                        "backdrop_url": backdrop,
+                        "progress_seconds": progress,
+                        "duration_seconds": duration,
+                        "progress_percent": percent,
+                        "remaining_seconds": remaining,
+                        "is_next_episode": False,
+                        "updated_at": r["updated_at"],
+                    })
+                elif media_type == "tv":
+                    curr_season = r.get("season_number") or 1
+                    curr_ep = r.get("episode_number") or 1
+
+                    is_completed = percent >= 90 or (duration > 120 and (duration - progress) < 90)
+                    if is_completed:
+                        next_ep = self._find_next_episode_sync(conn, r["media_id"], curr_season, curr_ep)
+                        if next_ep:
+                            results.append({
+                                "media_id": r["media_id"],
+                                "title": title_name,
+                                "media_type": "tv",
+                                "poster_url": next_ep.get("poster_url") or poster,
+                                "backdrop_url": backdrop,
+                                "season_number": next_ep["season_number"],
+                                "episode_number": next_ep["episode_number"],
+                                "episode_title": next_ep.get("title") or f"Episodio {next_ep['episode_number']}",
+                                "progress_seconds": 0,
+                                "duration_seconds": 0,
+                                "progress_percent": 0,
+                                "remaining_seconds": 0,
+                                "is_next_episode": True,
+                                "updated_at": r["updated_at"],
+                            })
+                    else:
+                        if progress < 15:
+                            continue
+                        remaining = max(0, int(duration - progress)) if duration > 0 else 0
+                        ep_title = self._get_episode_title_sync(conn, r["media_id"], curr_season, curr_ep)
+                        results.append({
+                            "media_id": r["media_id"],
+                            "title": title_name,
+                            "media_type": "tv",
+                            "poster_url": poster,
+                            "backdrop_url": backdrop,
+                            "season_number": curr_season,
+                            "episode_number": curr_ep,
+                            "episode_title": ep_title or f"Episodio {curr_ep}",
+                            "progress_seconds": progress,
+                            "duration_seconds": duration,
+                            "progress_percent": percent,
+                            "remaining_seconds": remaining,
+                            "is_next_episode": False,
+                            "updated_at": r["updated_at"],
+                        })
+
+                if len(results) >= limit:
+                    break
+
+            return results
+
+    def _find_next_episode_sync(self, conn: sqlite3.Connection, series_id: str, season_num: int, ep_num: int) -> dict[str, Any] | None:
+        """Find the next episode in the current season or the first episode of the next season."""
+        s_cursor = conn.execute("SELECT episodes_json FROM seasons WHERE series_id = ? AND season_number = ?", (series_id, season_num))
+        row = s_cursor.fetchone()
+        if row and row["episodes_json"]:
+            with contextlib.suppress(Exception):
+                episodes = json.loads(row["episodes_json"])
+                for ep in episodes:
+                    if int(ep.get("episode_number", 0)) == ep_num + 1:
+                        return {
+                            "season_number": season_num,
+                            "episode_number": ep_num + 1,
+                            "title": ep.get("title"),
+                            "poster_url": ep.get("poster_url"),
+                        }
+
+        next_s_cursor = conn.execute(
+            "SELECT episodes_json, season_number FROM seasons WHERE series_id = ? AND season_number = ?",
+            (series_id, season_num + 1),
+        )
+        next_row = next_s_cursor.fetchone()
+        if next_row and next_row["episodes_json"]:
+            with contextlib.suppress(Exception):
+                episodes = json.loads(next_row["episodes_json"])
+                if episodes:
+                    first_ep = episodes[0]
+                    return {
+                        "season_number": season_num + 1,
+                        "episode_number": int(first_ep.get("episode_number", 1)),
+                        "title": first_ep.get("title"),
+                        "poster_url": first_ep.get("poster_url"),
+                    }
+        return None
+
+    def _get_episode_title_sync(self, conn: sqlite3.Connection, series_id: str, season_num: int, ep_num: int) -> str | None:
+        """Get cached episode title."""
+        cursor = conn.execute("SELECT episodes_json FROM seasons WHERE series_id = ? AND season_number = ?", (series_id, season_num))
+        row = cursor.fetchone()
+        if row and row["episodes_json"]:
+            with contextlib.suppress(Exception):
+                episodes = json.loads(row["episodes_json"])
+                for ep in episodes:
+                    if int(ep.get("episode_number", 0)) == ep_num:
+                        return ep.get("title")
+        return None
+
+    async def delete_watch_history(self, media_id: str) -> None:
+        """Remove a title and all its episodes from watch history."""
+        async with self._lock:
+            await asyncio.to_thread(self._delete_watch_history_sync, media_id)
+
+    def _delete_watch_history_sync(self, media_id: str) -> None:
+        """Synchronously delete history by media_id."""
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM watch_history WHERE media_id = ?", (media_id,))
+
+    async def get_media_progress(self, media_id: str) -> dict[str, Any] | None:
+        """Get latest watch progress for a media_id."""
+        async with self._lock:
+            return await asyncio.to_thread(self._get_media_progress_sync, media_id)
+
+    def _get_media_progress_sync(self, media_id: str) -> dict[str, Any] | None:
+        """Synchronously get latest progress."""
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, media_id, title, poster_url, media_type,
+                       season_number, episode_number, progress_seconds, duration_seconds, updated_at
+                FROM watch_history
+                WHERE media_id = ?
+                ORDER BY updated_at DESC
+                LIMIT 1;
+                """,
+                (media_id,),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
 
     async def toggle_favorite(self, title_id: str, media_type: str, title: str, poster_url: str | None) -> bool:
         """Toggle favorite status. Returns True if now favorite, False if removed."""
