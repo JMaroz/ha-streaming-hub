@@ -334,12 +334,27 @@ def get_profile_trakt_client(profile: Profile) -> TraktClient | None:
 
 # Rating Hierarchy: T (0) -> 6+ (6) -> 14+ (14) -> 18+ (18) -> ALL (99)
 RATING_MAP: dict[str, int] = {
-    "T": 0, "0": 0, "G": 0, "TV-Y": 0, "TV-G": 0,
-    "6+": 6, "PG": 6, "TV-Y7": 6, "TV-PG": 6,
-    "14+": 14, "VM14": 14, "12+": 12, "PG-13": 13, "TV-14": 14, "16+": 16,
-    "18+": 18, "VM18": 18, "R": 17, "NC-17": 18, "TV-MA": 18,
+    "T": 0, "0": 0, "G": 0, "TV-Y": 0, "TV-G": 0, "PEGI 3": 0, "PEGI 0": 0,
+    "6+": 6, "6": 6, "PG": 6, "TV-Y7": 6, "TV-PG": 6, "PEGI 7": 6, "PEGI 6": 6,
+    "14+": 14, "14": 14, "VM14": 14, "12+": 12, "12": 12, "PG-13": 13, "TV-14": 14,
+    "16+": 16, "16": 16, "PEGI 12": 12, "PEGI 14": 14, "PEGI 16": 16,
+    "18+": 18, "18": 18, "VM18": 18, "R": 17, "NC-17": 18, "TV-MA": 18, "PEGI 18": 18,
     "ALL": 99,
 }
+
+def get_profile_max_rating(profile: Profile) -> int:
+    """Parse profile rating filter into maximum numerical age limit."""
+    filter_val = str(profile.rating_filter or "ALL").upper().strip()
+    if filter_val in ("ALL", "", "NONE"):
+        return 99
+    if filter_val in RATING_MAP:
+        return RATING_MAP[filter_val]
+    # Check digits like '7', '12', '14', '18'
+    digits = "".join(ch for ch in filter_val if ch.isdigit())
+    if digits:
+        val = int(digits)
+        return 0 if val <= 3 else val
+    return 99
 
 # Content classification definitions
 ADULT_KEYWORDS = {
@@ -353,6 +368,13 @@ KIDS_RESTRICTED_KEYWORDS = {
     "poliziesco", "guerra", "war", "psicologico", "mistero", "violenza"
 }
 
+UNSAFE_TITLE_KEYWORDS = {
+    "resident evil", "unabomber", "kill", "killer", "assassin", "blood",
+    "dead", "death", "zombie", "horror", "morte", "sangue", "massacro",
+    "omicidio", "delitto", "erotico", "sesso", "sex", "alien", "predator",
+    "nightmare", "saw", "demon", "diavolo", "satana", "evil", "terror"
+}
+
 FAMILY_FRIENDLY_KEYWORDS = {
     "animazione", "animation", "famiglia", "family", "kids", "bambini",
     "ragazzi", "children", "avventura", "adventure", "musica", "music",
@@ -362,11 +384,9 @@ FAMILY_FRIENDLY_KEYWORDS = {
 
 def is_title_allowed_for_profile(title_item: Movie | TvSeries | dict[str, Any], profile: Profile) -> bool:
     """Determine if a title passes the profile's content classification filter."""
-    filter_val = str(profile.rating_filter or "ALL").upper().strip()
-    if filter_val in ("ALL", "", "NONE"):
+    max_allowed = get_profile_max_rating(profile)
+    if max_allowed >= 99:
         return True
-
-    max_allowed = RATING_MAP.get(filter_val, 99)
 
     # Extract title, certification, and genres
     if isinstance(title_item, dict):
@@ -398,8 +418,10 @@ def is_title_allowed_for_profile(title_item: Movie | TvSeries | dict[str, Any], 
 
     # Fallback heuristic when certification is not explicitly tagged
     if max_allowed <= 6:
-        # Kids / Children profile (T or 6+): block mature, horror, crime, thriller genres
+        # Kids / Children profile (T or 6+ / PEGI 3 / PEGI 7)
         if any(rk in combined_text for rk in KIDS_RESTRICTED_KEYWORDS):
+            return False
+        if any(uk in title for uk in UNSAFE_TITLE_KEYWORDS):
             return False
 
         # If profile is 'T' (0) - strict family / kids content only
@@ -408,8 +430,10 @@ def is_title_allowed_for_profile(title_item: Movie | TvSeries | dict[str, Any], 
                 return False
 
     elif max_allowed <= 14:
-        # Teen profile (14+): block extreme horror/splatter/gore
-        if any(w in combined_text for w in ("splatter", "gore", "extreme horror")):
+        # Teen profile (12+ / 14+ / PEGI 12 / PEGI 14)
+        if any(w in combined_text for w in ("splatter", "gore", "extreme horror", "hardcore")):
+            return False
+        if any(uk in title for uk in ("erotico", "porno", "sesso", "xxx")):
             return False
 
     return True
@@ -551,7 +575,33 @@ async def get_latest(
 ) -> dict[str, Any]:
     """Retrieve latest titles across enabled sources with rating filter for active profile."""
     profile = get_profile_by_id(profile_id)
-    items = await source_manager.get_latest(media_type=type, source_filter=source, page=page)
+    max_rating = get_profile_max_rating(profile)
+
+    # For kids profiles (<= 6, e.g. T, 6+, PEGI 3, PEGI 7), generic unfiltered feed from scrapers
+    # contains adult/horror movies without genre tags. Instead, directly fetch certified family channels!
+    if max_rating <= 6:
+        items = []
+        if type in ("all", "movie"):
+            anim_m = await source_manager.get_by_genre("Animazione", media_type="movie", source_filter=source, page=page)
+            fam_m = await source_manager.get_by_genre("Famiglia", media_type="movie", source_filter=source, page=page)
+            items.extend(CatalogMerger.merge_movie_lists(anim_m, fam_m))
+        if type in ("all", "tv"):
+            anim_tv = await source_manager.get_by_genre("Animazione", media_type="tv", source_filter=source, page=page)
+            kids_tv = await source_manager.get_by_genre("Kids", media_type="tv", source_filter=source, page=page)
+            items.extend(CatalogMerger.merge_tv_lists(anim_tv, kids_tv))
+        if type == "all":
+            movies = [it for it in items if isinstance(it, Movie)]
+            series = [it for it in items if isinstance(it, TvSeries)]
+            interleaved = []
+            for i in range(max(len(movies), len(series))):
+                if i < len(movies):
+                    interleaved.append(movies[i])
+                if i < len(series):
+                    interleaved.append(series[i])
+            items = interleaved
+    else:
+        items = await source_manager.get_latest(media_type=type, source_filter=source, page=page)
+
     filtered = [item for item in items if is_title_allowed_for_profile(item, profile)]
     results = [item.to_dict() for item in filtered]
     return {"page": page, "source": source, "profile_id": profile.id, "results": results}

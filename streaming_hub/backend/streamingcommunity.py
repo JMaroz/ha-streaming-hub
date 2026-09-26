@@ -645,26 +645,76 @@ class StreamingCommunityClient:
             "Western",
         ]
 
+    GENRE_ID_MAP: dict[str, int] = {
+        "animazione": 19,
+        "avventura": 11,
+        "azione": 4,
+        "action & adventure": 13,
+        "commedia": 12,
+        "comico": 12,
+        "crime": 2,
+        "poliziesco": 2,
+        "documentario": 24,
+        "dramma": 1,
+        "drammatico": 1,
+        "famiglia": 16,
+        "fantasy": 8,
+        "storia": 22,
+        "storico": 22,
+        "biografico": 22,
+        "horror": 7,
+        "kids": 25,
+        "korean drama": 26,
+        "musica": 14,
+        "musicale": 14,
+        "mistero": 6,
+        "giallo": 6,
+        "reality": 18,
+        "romance": 15,
+        "sentimentale": 15,
+        "sci-fi & fantasy": 3,
+        "fantascienza": 10,
+        "soap": 23,
+        "thriller": 5,
+        "televisione film": 21,
+        "guerra": 9,
+        "war & politics": 17,
+        "western": 20,
+    }
+
+    def resolve_genre_id(self, genre: str) -> int | None:
+        """Resolve genre name or slug to StreamingCommunity numerical genre ID."""
+        clean = genre.strip().lower()
+        if clean in self.GENRE_ID_MAP:
+            return self.GENRE_ID_MAP[clean]
+        for k, v in self.GENRE_ID_MAP.items():
+            if k in clean or clean in k:
+                return v
+        return None
+
     async def get_by_genre(
         self,
         genre: str,
         media_type: str = "movie",
         page: int = 1,
     ) -> list[Movie | TvSeries]:
-        """Fetch titles by genre from archive or search fallback."""
+        """Fetch titles by genre from archive using genre[] numerical ID or search fallback."""
         m_type = "tv" if media_type == "tv" else "movie"
-        genre_slug = quote_plus(genre.strip().lower())
-        candidate_urls = [
-            f"{self.base_url}it/archive?type={m_type}&g[]={genre_slug}&page={page}",
-            f"{self.base_url}it/archive?type={m_type}&genre={genre_slug}&page={page}",
-            f"{self.base_url}it/archive?type={m_type}&genres[]={genre_slug}&page={page}",
-        ]
+        genre_id = self.resolve_genre_id(genre)
+        headers = {"X-Inertia": "true", "Accept": "text/html, application/xhtml+xml"}
+
+        candidate_urls: list[str] = []
+        if genre_id is not None:
+            candidate_urls.append(f"{self.base_url}it/archive?type={m_type}&genre[]={genre_id}&page={page}")
+        candidate_urls.append(f"{self.base_url}it/archive?type={m_type}&genre[]={quote_plus(genre.strip())}&page={page}")
+
         for url in candidate_urls:
             try:
-                html_text = await self._request(url)
+                html_text = await self._request(url, headers=headers)
                 page_data = self.extract_data_page(html_text)
                 props = page_data.get("props", {})
-                raw_titles = self._extract_titles_from_props(props, allow_sliders=(page == 1))
+                # Note: DO NOT allow sliders for genre archive to prevent returning generic home items!
+                raw_titles = self._extract_titles_from_props(props, allow_sliders=False)
                 if raw_titles:
                     results: list[Movie | TvSeries] = []
                     for t in raw_titles:
@@ -672,9 +722,15 @@ class StreamingCommunityClient:
                             continue
                         t_type = t.get("type", "movie")
                         if m_type == "tv" and t_type != "movie":
-                            results.append(self._item_to_tv_series(t))
+                            item = self._item_to_tv_series(t)
+                            if not item.genres:
+                                item.genres = [genre.capitalize()]
+                            results.append(item)
                         elif m_type == "movie" and t_type != "tv":
-                            results.append(self._item_to_movie(t))
+                            item = self._item_to_movie(t)
+                            if not item.genres:
+                                item.genres = [genre.capitalize()]
+                            results.append(item)
                     if results:
                         return results
             except Exception as err:
@@ -687,9 +743,13 @@ class StreamingCommunityClient:
             for item in search_items:
                 if m_type == "tv" and isinstance(item, TvSeries):
                     if not item.genres or any(genre_matches(genre, g) for g in item.genres):
+                        if not item.genres:
+                            item.genres = [genre.capitalize()]
                         filtered.append(item)
                 elif m_type == "movie" and isinstance(item, Movie):
                     if not item.genres or any(genre_matches(genre, g) for g in item.genres):
+                        if not item.genres:
+                            item.genres = [genre.capitalize()]
                         filtered.append(item)
             return filtered
         except Exception as err:

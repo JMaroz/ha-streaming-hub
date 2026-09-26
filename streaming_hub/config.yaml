@@ -3,7 +3,7 @@ name: "Streaming Hub"
 slug: "streaming_hub"
 description: "Hub multimediale per film e serie TV con streaming HLS, Ingress UI e supporto Cast"
 url: "https://github.com/JMaroz/ha-streaming-hub"
-version: "1.3.2"
+version: "1.3.3"
 init: false
 arch:
   - aarch64
