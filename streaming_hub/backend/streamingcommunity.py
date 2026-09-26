@@ -621,6 +621,91 @@ class StreamingCommunityClient:
 
         return []
 
+    async def get_genres(self) -> list[str]:
+        """Return the list of available genres."""
+        return [
+            "Animazione",
+            "Avventura",
+            "Azione",
+            "Biografico",
+            "Comico",
+            "Commedia",
+            "Documentario",
+            "Drammatico",
+            "Fantascienza",
+            "Fantasy",
+            "Giallo",
+            "Guerra",
+            "Horror",
+            "Musicale",
+            "Poliziesco",
+            "Sentimentale",
+            "Storico",
+            "Thriller",
+            "Western",
+        ]
+
+    async def get_by_genre(
+        self,
+        genre: str,
+        media_type: str = "movie",
+        page: int = 1,
+    ) -> list[Movie | TvSeries]:
+        """Fetch titles by genre from archive or search fallback."""
+        m_type = "tv" if media_type == "tv" else "movie"
+        genre_slug = quote_plus(genre.strip().lower())
+        candidate_urls = [
+            f"{self.base_url}it/archive?type={m_type}&g[]={genre_slug}&page={page}",
+            f"{self.base_url}it/archive?type={m_type}&genre={genre_slug}&page={page}",
+            f"{self.base_url}it/archive?type={m_type}&genres[]={genre_slug}&page={page}",
+        ]
+        for url in candidate_urls:
+            try:
+                html_text = await self._request(url)
+                page_data = self.extract_data_page(html_text)
+                props = page_data.get("props", {})
+                raw_titles = self._extract_titles_from_props(props, allow_sliders=(page == 1))
+                if raw_titles:
+                    results: list[Movie | TvSeries] = []
+                    for t in raw_titles:
+                        if not isinstance(t, dict) or not t.get("id"):
+                            continue
+                        t_type = t.get("type", "movie")
+                        if m_type == "tv" and t_type != "movie":
+                            results.append(self._item_to_tv_series(t))
+                        elif m_type == "movie" and t_type != "tv":
+                            results.append(self._item_to_movie(t))
+                    if results:
+                        return results
+            except Exception as err:
+                _LOGGER.debug("Archive genre fetch failed on %s: %s", url, err)
+
+        # Fallback: search by genre keyword and filter
+        try:
+            search_items = await self.search(genre)
+            filtered: list[Movie | TvSeries] = []
+            for item in search_items:
+                if m_type == "tv" and isinstance(item, TvSeries):
+                    if not item.genres or any(genre_matches(genre, g) for g in item.genres):
+                        filtered.append(item)
+                elif m_type == "movie" and isinstance(item, Movie):
+                    if not item.genres or any(genre_matches(genre, g) for g in item.genres):
+                        filtered.append(item)
+            return filtered
+        except Exception as err:
+            _LOGGER.debug("Search fallback for genre '%s' failed: %s", genre, err)
+
+        return []
+
+    async def get_movies_by_genre(
+        self,
+        genre: str,
+        page: int = 1,
+        is_tv: bool = False,
+    ) -> list[Movie | TvSeries]:
+        """Compatibility wrapper for get_by_genre."""
+        return await self.get_by_genre(genre, media_type="tv" if is_tv else "movie", page=page)
+
     async def get_movie(self, media_id: str, slug: str = "") -> Movie:
         """Fetch complete movie details."""
         clean_id = media_id.replace("sc-", "")

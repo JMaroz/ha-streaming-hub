@@ -143,6 +143,12 @@ class HACoreClient:
                     continue
 
                 friendly_name = attrs.get("friendly_name") or entity_id
+                if not attrs.get("friendly_name") or friendly_name.startswith("media_player.") or "tpm191e" in friendly_name.lower():
+                    if "tpm191e" in entity_id.lower():
+                        friendly_name = "Philips Smart TV (TPM191E)"
+                    elif friendly_name.startswith("media_player."):
+                        friendly_name = friendly_name.replace("media_player.", "").replace("_", " ").title()
+
                 name_lower = friendly_name.lower()
                 id_lower = entity_id.lower()
 
@@ -387,6 +393,7 @@ class HACoreClient:
         _LOGGER.info("Starting Cast watch progress tracker for %s on %s", title, entity_id)
         seek_done = seek_position <= 5
         idle_counter = 0
+        has_started_playing = False
 
         # Wait initial 4 seconds for Cast receiver launch
         await asyncio.sleep(4)
@@ -409,11 +416,14 @@ class HACoreClient:
                     _LOGGER.info("Seeking %s to resumed position %s seconds", entity_id, seek_position)
                     await self.seek_media(entity_id, seek_position)
                     seek_done = True
+                    has_started_playing = True
                     await asyncio.sleep(1)
                     continue
 
-                if state in ("playing", "paused"):
+                if state in ("playing", "paused", "buffering"):
                     idle_counter = 0
+                    if state == "playing":
+                        has_started_playing = True
                     pos = attrs.get("media_position")
                     dur = attrs.get("media_duration")
                     if pos is not None and float(pos) > 0:
@@ -429,12 +439,13 @@ class HACoreClient:
                         )
                 elif state in ("off", "idle", "standby"):
                     idle_counter += 1
-                    if idle_counter >= 3:
+                    max_idle = 3 if has_started_playing else 8
+                    if idle_counter >= max_idle:
                         _LOGGER.info("Cast device %s is %s, stopping tracker.", entity_id, state)
                         break
                 else:
                     idle_counter += 1
-                    if idle_counter >= 6:
+                    if idle_counter >= 8:
                         break
         except asyncio.CancelledError:
             _LOGGER.debug("Cast tracker cancelled for %s", entity_id)
@@ -469,10 +480,22 @@ class HACoreClient:
         if not is_active and target_id not in self._cast_trackers:
             return {"active": False, "entity_id": target_id, "state": state}
 
+        # Keep active if tracker is running during startup
+        if target_id in self._cast_trackers and not is_active:
+            is_active = True
+
+        raw_device_name = attrs.get("friendly_name") or target_id
+        if "tpm191e" in target_id.lower() or "tpm191e" in raw_device_name.lower():
+            friendly_device_name = "Philips Smart TV (TPM191E)"
+        elif raw_device_name.startswith("media_player."):
+            friendly_device_name = raw_device_name.replace("media_player.", "").replace("_", " ").title()
+        else:
+            friendly_device_name = raw_device_name
+
         return {
             "active": is_active,
             "entity_id": target_id,
-            "device_name": attrs.get("friendly_name") or target_id,
+            "device_name": friendly_device_name,
             "state": state,
             "title": session_info.get("title") or attrs.get("media_title") or "In riproduzione",
             "media_id": session_info.get("media_id"),

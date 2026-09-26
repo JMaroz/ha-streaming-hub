@@ -28,6 +28,7 @@ from .sources.cb01_source import CB01Source
 from .sources.detector import SourceDetector
 from .sources.manager import SourceManager
 from .sources.streamingcommunity_source import StreamingCommunitySource
+from .utils import CatalogMerger
 
 _LOGGER = logging.getLogger("streaming_hub")
 
@@ -175,7 +176,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Streaming Hub",
     description="Home Assistant App for media streaming, HLS proxying, and Cast control",
-    version="1.2.2",
+    version="1.2.3",
     lifespan=lifespan,
 )
 
@@ -253,7 +254,7 @@ async def get_status(request: Request) -> dict[str, Any]:
     return {
         "status": "online",
         "app_name": "Streaming Hub",
-        "version": "1.2.2",
+        "version": "1.2.3",
         "ingress_path": ingress_path,
         "ha_host_ip": ha_host,
         "stream_port": CONFIG.get("stream_port", 8099),
@@ -351,9 +352,15 @@ async def get_by_genre(
     source: str = Query("all"),
     page: int = Query(1, ge=1),
 ) -> dict[str, Any]:
-    """Browse catalog by genre across sources."""
-    items = await source_manager.get_by_genre(genre, media_type=type, source_filter=source, page=page)
-    results = [item.to_dict() for item in items]
+    """Browse catalog by genre across sources with cached database fallback/merge."""
+    live_items = await source_manager.get_by_genre(genre, media_type=type, source_filter=source, page=page)
+    db_items = await db.get_titles_by_genre(genre, media_type=type, limit=30)
+    if type == "tv":
+        merged = CatalogMerger.merge_tv_lists(live_items, db_items)
+    else:
+        merged = CatalogMerger.merge_movie_lists(live_items, db_items)
+
+    results = [item.to_dict() for item in merged]
     return {"genre": genre, "page": page, "source": source, "results": results}
 
 

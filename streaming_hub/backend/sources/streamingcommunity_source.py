@@ -147,8 +147,7 @@ class StreamingCommunitySource(BaseSource):
         """Fetch titles by genre."""
         if not self.is_enabled:
             return []
-        is_tv = media_type == "tv"
-        items = await self._client.get_movies_by_genre(genre, page=page, is_tv=is_tv)
+        items = await self._client.get_by_genre(genre, media_type=media_type, page=page)
         for item in items:
             if self.source_id not in item.catalogs:
                 item.catalogs.append(self.source_id)

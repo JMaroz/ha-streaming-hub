@@ -205,6 +205,49 @@ class MediaDatabase:
                     _LOGGER.warning("Corrupted raw_json for title %s: %s", title_id, err)
         return None
 
+    async def get_titles_by_genre(
+        self,
+        genre: str,
+        media_type: str = "movie",
+        limit: int = 40,
+    ) -> list[Movie | TvSeries]:
+        """Retrieve cached titles matching a genre."""
+        async with self._lock:
+            return await asyncio.to_thread(self._get_titles_by_genre_sync, genre, media_type, limit)
+
+    def _get_titles_by_genre_sync(
+        self,
+        genre: str,
+        media_type: str = "movie",
+        limit: int = 40,
+    ) -> list[Movie | TvSeries]:
+        """Synchronously query titles matching a genre."""
+        pattern = f"%{genre.lower()}%"
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                SELECT raw_json, media_type FROM titles
+                WHERE (media_type = ? OR ? = 'all')
+                  AND LOWER(genres) LIKE ?
+                ORDER BY year DESC, rating DESC
+                LIMIT ?
+                """,
+                (media_type, media_type, pattern, limit),
+            )
+            rows = cursor.fetchall()
+            items: list[Movie | TvSeries] = []
+            for row in rows:
+                if row["raw_json"]:
+                    try:
+                        data = json.loads(row["raw_json"])
+                        if row["media_type"] == "tv":
+                            items.append(TvSeries.from_dict(data))
+                        else:
+                            items.append(Movie.from_dict(data))
+                    except Exception:
+                        continue
+            return items
+
     async def save_season(self, series_id: str, season: TvSeason) -> None:
         """Persist a season with all its episodes to SQLite."""
         async with self._lock:

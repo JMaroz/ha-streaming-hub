@@ -296,6 +296,21 @@
     }
   }
 
+  // Helper: Format raw Home Assistant entity or device names into clean, friendly names
+  function formatDeviceName(entityId, rawName) {
+    if (rawName && rawName.trim() && !rawName.startsWith("media_player.") && !/tpm191e/i.test(rawName)) {
+      return rawName.trim();
+    }
+    const clean = (rawName || entityId || "").replace(/^media_player\./, "");
+    if (/tpm191e/i.test(clean)) {
+      return "Philips Smart TV (TPM191E)";
+    }
+    const formatted = clean
+      .replace(/[_-]+/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+    return formatted || "Dispositivo Cast";
+  }
+
   function renderPlayersSelect() {
     elements.deviceSelect.innerHTML = '<option value="browser">💻 Browser Locale (Web Player)</option>';
     if (state.mediaPlayers && state.mediaPlayers.length > 0) {
@@ -306,7 +321,8 @@
         const opt = document.createElement("option");
         opt.value = p.entity_id;
         const stateNote = p.state === "off" ? " (Standby)" : "";
-        opt.textContent = `📺 ${p.name}${stateNote}`;
+        const friendly = formatDeviceName(p.entity_id, p.name);
+        opt.textContent = `📺 ${friendly}${stateNote}`;
         group.appendChild(opt);
       });
 
@@ -965,7 +981,7 @@
       }
     } else {
       const dev = state.mediaPlayers.find((p) => p.entity_id === state.selectedDevice);
-      const name = dev ? dev.name : "Dispositivo Cast";
+      const name = dev ? formatDeviceName(dev.entity_id, dev.name) : "Dispositivo Cast";
       if (hasResume) {
         elements.btnPlayText.textContent = `📺 Riprendi ${epPrefix}${resumeTimeStr} su ${name}`;
       } else {
@@ -1052,25 +1068,34 @@
 
   // Cast to HA Device
   async function castToDevice(source, title, entityId) {
-    showToast(`Invio comando Cast a ${entityId}...`, "info");
+    const currentItem = state.selectedItem;
+    const isTv = currentItem && (currentItem.type === "tv" || !!currentItem.seasons);
+    const hasResume = state.resumeProgress && state.resumeProgress.progress_seconds > 15;
+    const resumeSec = hasResume ? state.resumeProgress.progress_seconds : 0;
+    const seasonNum = isTv ? state.selectedSeason : null;
+    const epNum = (isTv && state.selectedEpisode) ? state.selectedEpisode.episode_number : null;
+    const mediaId = currentItem ? currentItem.id : source.media_id;
+    const posterUrl = currentItem ? (currentItem.backdrop_url || currentItem.poster_url || "") : "";
+
+    const dev = state.mediaPlayers.find((p) => p.entity_id === entityId);
+    const friendlyName = formatDeviceName(entityId, dev ? dev.name : "");
+
+    showToast(`Avvio riproduzione su ${friendlyName}...`, "info");
     elements.btnPlayTrigger.disabled = true;
 
     try {
-      const isTv = state.selectedItem && (state.selectedItem.type === "tv" || !!state.selectedItem.seasons);
-      const hasResume = state.resumeProgress && state.resumeProgress.progress_seconds > 15;
-
       const payload = {
         entity_id: entityId,
         page_url: source.page_url,
         title: title,
-        poster_url: state.selectedItem.backdrop_url || state.selectedItem.poster_url,
+        poster_url: posterUrl,
         provider_id: source.provider_id,
-        media_id: state.selectedItem ? state.selectedItem.id : source.media_id,
+        media_id: mediaId,
         quality: source.quality,
         media_type: isTv ? "tv" : "movie",
-        season_number: isTv ? state.selectedSeason : null,
-        episode_number: (isTv && state.selectedEpisode) ? state.selectedEpisode.episode_number : null,
-        seek_seconds: hasResume ? state.resumeProgress.progress_seconds : 0,
+        season_number: seasonNum,
+        episode_number: epNum,
+        seek_seconds: resumeSec,
       };
 
       const resp = await fetch(apiUrl("api/cast"), {
@@ -1086,24 +1111,24 @@
 
       const data = await resp.json();
       const actualEntity = data.entity_id || entityId;
-      const dev = state.mediaPlayers.find((p) => p.entity_id === actualEntity);
-      const devName = dev ? dev.name : actualEntity;
+      const actualDev = state.mediaPlayers.find((p) => p.entity_id === actualEntity);
+      const actualDevName = formatDeviceName(actualEntity, actualDev ? actualDev.name : friendlyName);
 
-      showToast(`Riproduzione avviata con successo su ${devName}!`, "success");
-      closeModal();
+      showToast(`In riproduzione su ${actualDevName}!`, "success");
 
-      // Show persistent Cast Control Bar immediately
+      // Show persistent Cast Control Bar BEFORE closing modal so state is preserved
       showCastBar({
         entityId: actualEntity,
-        deviceName: devName,
+        deviceName: actualDevName,
         title: title,
-        posterUrl: state.selectedItem.backdrop_url || state.selectedItem.poster_url,
+        posterUrl: posterUrl,
         isTv: isTv,
-        season: isTv ? state.selectedSeason : null,
-        episode: (isTv && state.selectedEpisode) ? state.selectedEpisode.episode_number : null,
-        seekSeconds: hasResume ? state.resumeProgress.progress_seconds : 0,
+        season: seasonNum,
+        episode: epNum,
+        seekSeconds: resumeSec,
       });
 
+      closeModal();
       setTimeout(loadContinueWatching, 3000);
     } catch (err) {
       console.error("Cast error:", err);
@@ -1599,7 +1624,7 @@
       if (data && data.active && data.entity_id) {
         showCastBar({
           entityId: data.entity_id,
-          deviceName: data.device_name,
+          deviceName: formatDeviceName(data.entity_id, data.device_name),
           title: data.title,
           posterUrl: data.poster_url,
           isTv: data.media_type === "tv",
@@ -1612,6 +1637,42 @@
       console.debug("Could not restore cast session:", err);
     }
   }
+
+  // Handle Mobile App Standby / Background wake up
+  function handleAppResume() {
+    console.debug("[StreamingHub] Resuming from background/standby");
+    // Clear stuck loading states or disabled buttons
+    if (elements.btnPlayTrigger) {
+      elements.btnPlayTrigger.disabled = false;
+    }
+    showLoading(false);
+
+    // Refresh core states
+    checkStatus();
+    loadPlayers();
+    loadContinueWatching();
+
+    // Check or resume active cast polling
+    if (state.castSession && state.castSession.active && state.castSession.entityId) {
+      startCastPolling(state.castSession.entityId);
+    } else {
+      checkActiveCastSession();
+    }
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      handleAppResume();
+    }
+  });
+
+  window.addEventListener("pageshow", () => {
+    handleAppResume();
+  });
+
+  window.addEventListener("focus", () => {
+    handleAppResume();
+  });
 
   // Start app on DOM ready
   if (document.readyState === "loading") {

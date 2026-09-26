@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.2.3
+
+### Bug Fixes & Resilience Improvements
+- **Cast Mini-Player & UI Bar Crash Resolution**:
+  - Fixed a `TypeError` in the frontend caused by accessing `state.selectedItem` after `closeModal()` had set it to `null`.
+  - Caches title metadata (`poster_url`, `isTv`, `season`, `episode`, `seek_seconds`) before initiating playback, ensuring the Cast Control Bar appears reliably every time casting begins.
+- **User-Friendly Device Names & Clean Notifications**:
+  - Replaced technical entity identifiers (such as `media_player.tpm191e`) in toast alerts and device selectors with formatted friendly names (e.g. `Philips Smart TV (TPM191E)`).
+  - Toast notifications updated to friendly messages: `Avvio riproduzione su <Dispositivo>...` and `In riproduzione su <Dispositivo>!`.
+- **Genre Catalog Search & Cross-Catalog Merging**:
+  - Implemented `get_movies_by_genre` on `CB01Client` and `get_by_genre` on `StreamingCommunityClient`.
+  - Added SQLite title cache lookup (`get_titles_by_genre`) to merge locally stored titles with live scraper results for fast, reliable genre browsing for both movies and TV series.
+- **Mobile App Background/Standby Recovery**:
+  - Added lifecycle listeners (`visibilitychange`, `pageshow`, and `focus`) to detect when the Home Assistant Mobile App or browser tab wakes up from standby.
+  - Automatically resets stuck loading states, reloads players, refreshes "Continue Watching", and reconnects active Cast playback tracking.
+- **Cast Session Startup Grace Period**:
+  - Extended TV receiver startup tolerance in backend Cast tracker to avoid premature session cancellation while TV apps boot.
+
 ## 1.2.2
 
 ### Nuova Funzionalità: Barra di Controllo e Riproduzione Cast (Mini-Player)

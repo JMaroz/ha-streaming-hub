@@ -116,6 +116,25 @@ class CB01Client:
         movies = await self.get_catalog_page(page)
         return [m for m in movies if not CB01Parser.is_tv_item(m.title, m.cb01_url, m.genres)]
 
+    async def get_movies_by_genre(self, genre: str, page: int = 1) -> list[Movie]:
+        """Fetch movies matching a specific genre."""
+        slug = genre.strip().lower().replace(" ", "-")
+        path = f"genere/{slug}/"
+        if page > 1:
+            path += f"page/{page}/"
+        url = urljoin(self.base_url, path)
+        try:
+            html_text = await self._request(url)
+            movies = CB01Parser.parse_catalog_page(html_text)
+            return [m for m in movies if not CB01Parser.is_tv_item(m.title, m.cb01_url, m.genres)]
+        except Exception as err:
+            _LOGGER.debug("CB01 genre '%s' fetch failed on %s: %s", genre, url, err)
+            try:
+                search_results = await self.search(genre)
+                return [m for m in search_results if isinstance(m, Movie)]
+            except Exception:
+                return []
+
     async def get_catalog_page(self, page: int = 1) -> list[Movie]:
         """Fetch a specific page from the catalog."""
         url = self.base_url if page <= 1 else urljoin(self.base_url, f"page/{page}/")
