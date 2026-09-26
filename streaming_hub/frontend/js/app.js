@@ -171,13 +171,15 @@
   async function init() {
     setupEventListeners();
     await checkStatus();
-    await loadProfiles();
+    const needsPicker = await loadProfiles();
     loadPlayers();
     loadGenres();
     await loadSources();
-    refreshAllShelves();
-    loadCatalog();
-    checkActiveCastSession();
+    if (!needsPicker) {
+      refreshAllShelves();
+      loadCatalog();
+      checkActiveCastSession();
+    }
   }
 
   // Status Check
@@ -431,7 +433,9 @@
     const hasChosenThisSession = sessionStorage.getItem("streaming_hub_profile_selected");
     if (!hasChosenThisSession && state.profiles.length > 1) {
       openProfilePickerModal();
+      return true; // Picker active: defer heavy catalog loading
     }
+    return false;
   }
 
   function getActiveProfile() {
@@ -480,7 +484,7 @@
       row.addEventListener("click", () => {
         elements.profileDropdownWrapper.classList.remove("open");
         elements.profileDropdownMenu.classList.add("hidden");
-        selectProfile(p.id);
+        selectProfile(p.id, true);
       });
 
       elements.profilesListMenu.appendChild(row);
@@ -506,8 +510,8 @@
       `;
 
       card.addEventListener("click", () => {
-        selectProfile(p.id);
         elements.profilePickerModal.classList.add("hidden");
+        selectProfile(p.id, true);
       });
 
       elements.profilePickerGrid.appendChild(card);
@@ -516,8 +520,9 @@
     elements.profilePickerModal.classList.remove("hidden");
   }
 
-  async function selectProfile(profileId) {
-    if (state.activeProfileId === profileId) {
+  async function selectProfile(profileId, force = false) {
+    const isSame = state.activeProfileId === profileId;
+    if (isSame && !force) {
       sessionStorage.setItem("streaming_hub_profile_selected", "1");
       return;
     }
@@ -530,11 +535,22 @@
     renderProfileDropdown();
 
     const current = getActiveProfile();
-    showToast(`Benvenuto, ${current.name}!`, "info");
+    showToast(`Profilo attivo: ${current.name}`, "info");
 
-    // Refresh all profile-scoped data
+    // Immediately clear previous content and show loader to prevent showing previous profile data
+    elements.catalogGrid.innerHTML = "";
+    if (elements.continueRow) elements.continueRow.innerHTML = "";
+    if (elements.favoritesRow) elements.favoritesRow.innerHTML = "";
+    if (elements.watchedRow) elements.watchedRow.innerHTML = "";
+    if (elements.continueSection) elements.continueSection.classList.add("hidden");
+    if (elements.favoritesSection) elements.favoritesSection.classList.add("hidden");
+    if (elements.watchedSection) elements.watchedSection.classList.add("hidden");
+    showLoading(true);
+
+    // Refresh all profile-scoped data immediately
     refreshAllShelves();
     loadCatalog();
+    checkActiveCastSession();
   }
 
   // Load Media Players from Home Assistant

@@ -341,37 +341,75 @@ RATING_MAP: dict[str, int] = {
     "ALL": 99,
 }
 
-RESTRICTED_GENRES_FOR_KIDS = {"erotico", "horror", "splatter", "crime", "thriller", "giallo"}
+# Content classification definitions
+ADULT_KEYWORDS = {
+    "erotico", "erotica", "erotismo", "adulti", "adult", "pornografico",
+    "porno", "softcore", "hardcore", "hentai", "sexy", "red light",
+    "vm18", "18+", "xxx", "erotic"
+}
+
+KIDS_RESTRICTED_KEYWORDS = {
+    "horror", "splatter", "gore", "crime", "thriller", "giallo",
+    "poliziesco", "guerra", "war", "psicologico", "mistero", "violenza"
+}
+
+FAMILY_FRIENDLY_KEYWORDS = {
+    "animazione", "animation", "famiglia", "family", "kids", "bambini",
+    "ragazzi", "children", "avventura", "adventure", "musica", "music",
+    "commedia", "comedy", "documentario", "documentary", "fantasy", "fiaba"
+}
 
 
 def is_title_allowed_for_profile(title_item: Movie | TvSeries | dict[str, Any], profile: Profile) -> bool:
     """Determine if a title passes the profile's content classification filter."""
-    filter_val = profile.rating_filter.upper()
-    if filter_val in ("ALL", ""):
+    filter_val = str(profile.rating_filter or "ALL").upper().strip()
+    if filter_val in ("ALL", "", "NONE"):
         return True
 
     max_allowed = RATING_MAP.get(filter_val, 99)
 
-    # Extract certification
+    # Extract title, certification, and genres
     if isinstance(title_item, dict):
+        title = str(title_item.get("title") or "").lower()
         cert = str(title_item.get("certification") or "").upper().strip()
         genres = [str(g).lower() for g in title_item.get("genres") or []]
+        desc = str(title_item.get("description") or "").lower()
     else:
+        title = str(getattr(title_item, "title", "") or "").lower()
         cert = str(getattr(title_item, "certification", "") or "").upper().strip()
         genres = [str(g).lower() for g in getattr(title_item, "genres", []) or []]
+        desc = str(getattr(title_item, "description", "") or "").lower()
 
+    combined_text = f"{title} {' '.join(genres)} {desc[:200]}"
+
+    # For any profile under 18: strictly block adult / erotic content
+    if max_allowed < 18:
+        if any(ak in combined_text for ak in ADULT_KEYWORDS):
+            return False
+
+    # Check explicit certification if available
     if cert:
         score = RATING_MAP.get(cert)
         if score is None:
-            # Check numbers like '14' in certification
             clean_digits = "".join(ch for ch in cert if ch.isdigit())
-            score = int(clean_digits) if clean_digits else 0
-        return score <= max_allowed
+            score = int(clean_digits) if clean_digits else None
+        if score is not None:
+            return score <= max_allowed
 
-    # If certification is not yet known, inspect genres for restricted profiles
+    # Fallback heuristic when certification is not explicitly tagged
     if max_allowed <= 6:
-        # Hide adult/horror genres for kids
-        if any(rg in " ".join(genres) for rg in RESTRICTED_GENRES_FOR_KIDS):
+        # Kids / Children profile (T or 6+): block mature, horror, crime, thriller genres
+        if any(rk in combined_text for rk in KIDS_RESTRICTED_KEYWORDS):
+            return False
+
+        # If profile is 'T' (0) - strict family / kids content only
+        if max_allowed == 0:
+            if genres and not any(fk in " ".join(genres) for fk in FAMILY_FRIENDLY_KEYWORDS):
+                return False
+
+    elif max_allowed <= 14:
+        # Teen profile (14+): block extreme horror/splatter/gore
+        if any(w in combined_text for w in ("splatter", "gore", "extreme horror")):
             return False
 
     return True
