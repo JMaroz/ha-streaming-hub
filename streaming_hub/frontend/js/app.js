@@ -157,7 +157,13 @@
   // Helper: Format base API URL respecting Ingress
   function apiUrl(endpoint) {
     const cleanEndpoint = endpoint.startsWith("/") ? endpoint.slice(1) : endpoint;
-    const base = state.ingressPath ? `${state.ingressPath.replace(/\/$/, "")}/` : "";
+    let base = state.ingressPath;
+    if (!base) {
+      base = window.location.pathname || "/";
+    }
+    if (!base.endsWith("/")) {
+      base += "/";
+    }
     return `${base}${cleanEndpoint}`;
   }
 
@@ -177,7 +183,7 @@
   // Status Check
   async function checkStatus() {
     try {
-      const resp = await fetch("api/status");
+      const resp = await fetch(apiUrl("api/status"));
       if (resp.ok) {
         const data = await resp.json();
         if (data.ingress_path) {
@@ -699,7 +705,15 @@
       if (elements.favoritesSection) elements.favoritesSection.classList.add("hidden");
       if (elements.watchedSection) elements.watchedSection.classList.add("hidden");
     } else {
-      refreshAllShelves();
+      if (elements.continueSection && elements.continueRow && elements.continueRow.children.length > 0) {
+        elements.continueSection.classList.remove("hidden");
+      }
+      if (elements.favoritesSection && elements.favoritesRow && elements.favoritesRow.children.length > 0) {
+        elements.favoritesSection.classList.remove("hidden");
+      }
+      if (elements.watchedSection && elements.watchedRow && elements.watchedRow.children.length > 0) {
+        elements.watchedSection.classList.remove("hidden");
+      }
     }
 
     // Tab "favorites"
@@ -851,6 +865,7 @@
 
     elements.emptyState.classList.add("hidden");
 
+    const fragment = document.createDocumentFragment();
     items.forEach((item) => {
       const card = document.createElement("div");
       card.className = "media-card";
@@ -915,8 +930,9 @@
       `;
 
       card.addEventListener("click", () => openDetails(item));
-      elements.catalogGrid.appendChild(card);
+      fragment.appendChild(card);
     });
+    elements.catalogGrid.appendChild(fragment);
   }
 
   // Hero Banner Update
@@ -1000,6 +1016,7 @@
       elements.favoritesCount.textContent = `${items.length} preferiti`;
     }
 
+    const fragment = document.createDocumentFragment();
     items.forEach((item) => {
       const card = document.createElement("div");
       card.className = "media-card";
@@ -1021,8 +1038,9 @@
       `;
 
       card.addEventListener("click", () => openDetails(item));
-      elements.favoritesRow.appendChild(card);
+      fragment.appendChild(card);
     });
+    elements.favoritesRow.appendChild(fragment);
   }
 
   // Watched Shelf
@@ -1055,6 +1073,7 @@
       elements.watchedCount.textContent = `${items.length} completati`;
     }
 
+    const fragment = document.createDocumentFragment();
     items.forEach((item) => {
       const card = document.createElement("div");
       card.className = "media-card";
@@ -1084,8 +1103,9 @@
           poster_url: item.poster_url,
         });
       });
-      elements.watchedRow.appendChild(card);
+      fragment.appendChild(card);
     });
+    elements.watchedRow.appendChild(fragment);
   }
 
   // Toggle Favorite
@@ -1176,6 +1196,7 @@
       elements.continueCount.textContent = `${items.length} in corso`;
     }
 
+    const fragment = document.createDocumentFragment();
     items.forEach((item) => {
       const card = document.createElement("div");
       card.className = "continue-card";
@@ -1253,8 +1274,9 @@
         openDetails(dummyItem, item.season_number, item.episode_number);
       });
 
-      elements.continueRow.appendChild(card);
+      fragment.appendChild(card);
     });
+    elements.continueRow.appendChild(fragment);
   }
 
   // Open Details Modal
@@ -2155,8 +2177,16 @@
     }
   }
 
-  // Handle Mobile App Standby / Background wake up
+  // Handle Mobile App Standby / Background wake up with throttle
+  let lastResumeTime = 0;
   function handleAppResume() {
+    const now = Date.now();
+    // Throttle: ignore resumes fired less than 15 seconds apart to avoid flooding HA / browser
+    if (now - lastResumeTime < 15000) {
+      return;
+    }
+    lastResumeTime = now;
+
     console.debug("[StreamingHub] Resuming from background/standby");
     // Clear stuck loading states or disabled buttons
     if (elements.btnPlayTrigger) {
@@ -2165,7 +2195,6 @@
     showLoading(false);
 
     // Refresh core states
-    checkStatus();
     loadPlayers();
     refreshAllShelves();
 
@@ -2184,10 +2213,6 @@
   });
 
   window.addEventListener("pageshow", () => {
-    handleAppResume();
-  });
-
-  window.addEventListener("focus", () => {
     handleAppResume();
   });
 
