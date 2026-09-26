@@ -245,6 +245,72 @@ class MediaDatabase:
                     _LOGGER.warning("Corrupted raw_json for title %s: %s", title_id, err)
         return None
 
+    async def enrich_items_with_cached_metadata(self, items: list[Any]) -> None:
+        """Enrich a batch of items in-place with SQLite-cached certification, genres and URLs."""
+        if not items:
+            return
+        async with self._lock:
+            await asyncio.to_thread(self._enrich_items_sync, items)
+
+    def _enrich_items_sync(self, items: list[Any]) -> None:
+        """Synchronously match and enrich items with cached certification, genres and URLs."""
+        id_map: dict[str, Any] = {}
+        for it in items:
+            mid = it.get("id") if isinstance(it, dict) else getattr(it, "id", None)
+            if mid:
+                id_map[str(mid)] = it
+
+        if not id_map:
+            return
+
+        with self._get_connection() as conn:
+            keys = list(id_map.keys())
+            chunk_size = 100
+            for i in range(0, len(keys), chunk_size):
+                chunk = keys[i : i + chunk_size]
+                placeholders = ",".join("?" * len(chunk))
+                cursor = conn.execute(
+                    f"SELECT id, certification, genres, tmdb_id, streamingcommunity_url, cb01_url FROM titles WHERE id IN ({placeholders})",
+                    chunk,
+                )
+                for row in cursor.fetchall():
+                    tid = str(row["id"])
+                    target = id_map.get(tid)
+                    if not target:
+                        continue
+                    cert = row["certification"]
+                    raw_g = row["genres"]
+                    sc_url = row["streamingcommunity_url"]
+                    cb_url = row["cb01_url"]
+
+                    if cert:
+                        if isinstance(target, dict):
+                            target["certification"] = cert
+                        else:
+                            target.certification = cert
+                    if raw_g:
+                        try:
+                            g_list = json.loads(raw_g) if raw_g.startswith("[") else [x.strip() for x in raw_g.split(",") if x.strip()]
+                            if g_list:
+                                if isinstance(target, dict):
+                                    if not target.get("genres"):
+                                        target["genres"] = g_list
+                                else:
+                                    if not getattr(target, "genres", None):
+                                        target.genres = g_list
+                        except Exception:
+                            pass
+                    if sc_url:
+                        if isinstance(target, dict) and not target.get("streamingcommunity_url"):
+                            target["streamingcommunity_url"] = sc_url
+                        elif not getattr(target, "streamingcommunity_url", None):
+                            target.streamingcommunity_url = sc_url
+                    if cb_url:
+                        if isinstance(target, dict) and not target.get("cb01_url"):
+                            target["cb01_url"] = cb_url
+                        elif not getattr(target, "cb01_url", None):
+                            target.cb01_url = cb_url
+
     async def get_titles_by_genre(
         self,
         genre: str,

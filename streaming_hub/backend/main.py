@@ -602,9 +602,35 @@ async def get_latest(
     else:
         items = await source_manager.get_latest(media_type=type, source_filter=source, page=page)
 
+    # 1. Hydrate titles with SQLite-cached certification, genres, and hosting URLs
+    await db.enrich_items_with_cached_metadata(items)
+
     filtered = [item for item in items if is_title_allowed_for_profile(item, profile)]
+
+    # 2. If rating filtering reduced the page below 15 items on an active profile, top up from next upstream page
+    if len(filtered) < 15 and max_rating < 99 and page < 10:
+        try:
+            extra_items = await source_manager.get_latest(media_type=type, source_filter=source, page=page + 1)
+            if extra_items:
+                await db.enrich_items_with_cached_metadata(extra_items)
+                extra_filtered = [it for it in extra_items if is_title_allowed_for_profile(it, profile)]
+                filtered.extend(extra_filtered)
+        except Exception:
+            pass
+
     results = [item.to_dict() for item in filtered]
-    return {"page": page, "source": source, "profile_id": profile.id, "results": results}
+    from_idx = (page - 1) * 30 + 1 if results else 0
+    to_idx = from_idx + len(results) - 1 if results else 0
+
+    return {
+        "page": page,
+        "source": source,
+        "profile_id": profile.id,
+        "count": len(results),
+        "from": from_idx,
+        "to": to_idx,
+        "results": results,
+    }
 
 
 @app.get("/api/catalog/search")
@@ -618,6 +644,7 @@ async def search_catalog(
     profile = get_profile_by_id(profile_id)
     query = q.strip()
     items = await source_manager.search(query, media_type=type, source_filter=source)
+    await db.enrich_items_with_cached_metadata(items)
     filtered = [item for item in items if is_title_allowed_for_profile(item, profile)]
     results = [item.to_dict() for item in filtered]
     return {"query": query, "source": source, "profile_id": profile.id, "count": len(results), "results": results}
@@ -646,9 +673,22 @@ async def get_by_genre(
     else:
         merged = CatalogMerger.merge_movie_lists(live_items, db_items)
 
+    await db.enrich_items_with_cached_metadata(merged)
     filtered = [item for item in merged if is_title_allowed_for_profile(item, profile)]
     results = [item.to_dict() for item in filtered]
-    return {"genre": genre, "page": page, "source": source, "profile_id": profile.id, "results": results}
+    from_idx = (page - 1) * 30 + 1 if results else 0
+    to_idx = from_idx + len(results) - 1 if results else 0
+
+    return {
+        "genre": genre,
+        "page": page,
+        "source": source,
+        "profile_id": profile.id,
+        "count": len(results),
+        "from": from_idx,
+        "to": to_idx,
+        "results": results,
+    }
 
 
 @app.get("/api/catalog/title/{media_type}/{title_id}")
