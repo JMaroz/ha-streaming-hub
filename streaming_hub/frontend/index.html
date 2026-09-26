@@ -30,17 +30,52 @@
           <button class="nav-tab active" data-type="all">Tutti</button>
           <button class="nav-tab" data-type="movie">Film</button>
           <button class="nav-tab" data-type="tv">Serie TV</button>
+          <button class="nav-tab" data-type="favorites">Preferiti</button>
+          <button class="nav-tab" data-type="watched">Visti</button>
           <button class="nav-tab" id="btn-genres-toggle">Generi ▾</button>
         </nav>
 
-        <div class="nav-search">
-          <div class="search-box">
-            <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="11" cy="11" r="8"/>
-              <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-            </svg>
-            <input type="text" id="search-input" placeholder="Cerca film o serie TV..." autocomplete="off">
-            <button id="search-clear" class="btn-clear hidden">✕</button>
+        <div class="nav-actions">
+          <div class="nav-search">
+            <div class="search-box">
+              <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"/>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+              <input type="text" id="search-input" placeholder="Cerca film o serie TV..." autocomplete="off">
+              <button id="search-clear" class="btn-clear hidden">✕</button>
+            </div>
+          </div>
+
+          <!-- Netflix-Style Profile Dropdown -->
+          <div class="profile-dropdown-wrapper" id="profile-dropdown-wrapper">
+            <button class="btn-profile-pill" id="btn-profile-pill" title="Cambia Profilo">
+              <div class="profile-avatar-thumb avatar-bg-1" id="nav-profile-avatar">P</div>
+              <span class="nav-profile-name" id="nav-profile-name">Principale</span>
+              <svg class="dropdown-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
+
+            <div class="profile-dropdown-menu hidden" id="profile-dropdown-menu">
+              <div class="dropdown-header">Profili Famiglia</div>
+              <div class="profiles-list-menu" id="profiles-list-menu">
+                <!-- Injected dynamically -->
+              </div>
+              <div class="dropdown-divider"></div>
+              <button class="dropdown-item" id="btn-dropdown-switch">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                <span>Chi sta guardando?</span>
+              </button>
+              <button class="dropdown-item" id="btn-dropdown-favorites">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+                <span>I Miei Preferiti</span>
+              </button>
+              <button class="dropdown-item" id="btn-dropdown-watched">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                <span>Titoli Già Visti</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -72,6 +107,9 @@
               <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
               Guarda Ora
             </button>
+            <button id="hero-favorite-btn" class="btn btn-secondary btn-icon-only" title="Aggiungi ai Preferiti">
+              <svg class="heart-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+            </button>
             <button id="hero-info-btn" class="btn btn-secondary">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
               Dettagli
@@ -80,8 +118,8 @@
         </div>
       </section>
 
-      <!-- Continue Watching Section -->
-      <section id="continue-section" class="continue-section hidden">
+      <!-- Continue Watching Carousel -->
+      <section id="continue-section" class="continue-section carousel-shelf hidden">
         <div class="section-header">
           <div class="header-left">
             <h2 class="section-title">
@@ -90,10 +128,41 @@
           </div>
           <span id="continue-count" class="section-count"></span>
         </div>
-        <div id="continue-row" class="continue-row">
+        <div id="continue-row" class="continue-row horizontal-scroll">
           <!-- Populated dynamically -->
         </div>
       </section>
+
+      <!-- Favorites Carousel -->
+      <section id="favorites-section" class="favorites-section carousel-shelf hidden">
+        <div class="section-header">
+          <div class="header-left">
+            <h2 class="section-title">
+              <span class="section-icon">❤️</span> I Tuoi Preferiti
+            </h2>
+          </div>
+          <span id="favorites-count" class="section-count"></span>
+        </div>
+        <div id="favorites-row" class="favorites-row horizontal-scroll">
+          <!-- Populated dynamically -->
+        </div>
+      </section>
+
+      <!-- Watched Recently Carousel -->
+      <section id="watched-section" class="watched-section carousel-shelf hidden">
+        <div class="section-header">
+          <div class="header-left">
+            <h2 class="section-title">
+              <span class="section-icon">✅</span> Visti di Recente
+            </h2>
+          </div>
+          <span id="watched-count" class="section-count"></span>
+        </div>
+        <div id="watched-row" class="watched-row horizontal-scroll">
+          <!-- Populated dynamically -->
+        </div>
+      </section>
+
 
       <!-- Catalog Section -->
       <section class="catalog-section">
@@ -209,11 +278,15 @@
                 <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                 <span id="btn-play-text">Avvia Riproduzione</span>
               </button>
+              <button id="btn-favorite-trigger" class="btn btn-secondary btn-icon-only" title="Aggiungi o Rimuovi dai Preferiti">
+                <svg class="heart-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+              </button>
               <button id="btn-restart-trigger" class="btn btn-secondary hidden" title="Ricomincia dal primo secondo">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
                 <span>Dall'inizio</span>
               </button>
             </div>
+
           </div>
         </div>
       </div>
@@ -335,6 +408,19 @@
       </div>
     </div>
 
+    <!-- Netflix-Style Who is Watching? Modal -->
+    <div id="profile-picker-modal" class="modal profile-picker-overlay hidden">
+      <div class="profile-picker-container">
+        <h1 class="profile-picker-title">Chi sta guardando?</h1>
+        <div class="profile-picker-grid" id="profile-picker-grid">
+          <!-- Profiles injected dynamically -->
+        </div>
+        <div class="profile-picker-footer">
+          <p class="profile-picker-hint">Puoi aggiungere o gestire i componenti della famiglia nelle <strong>Impostazioni &gt; Componenti aggiuntivi &gt; Streaming Hub</strong> in Home Assistant.</p>
+        </div>
+      </div>
+    </div>
+
     <!-- Toast Notifications -->
     <div id="toast-container" class="toast-container"></div>
   </div>
@@ -342,3 +428,4 @@
   <script src="js/app.js"></script>
 </body>
 </html>
+

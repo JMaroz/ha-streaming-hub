@@ -39,3 +39,7 @@ ENV/
 
 # Logs
 *.log
+
+# Local test databases & persistent test data
+data/
+*.db

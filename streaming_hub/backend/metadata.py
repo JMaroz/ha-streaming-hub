@@ -42,13 +42,16 @@ class MetadataEnricher:
         """Determine if the TMDb key is a v4 Read Access Token."""
         return self.tmdb_api_key.startswith("eyJ") or len(self.tmdb_api_key) > 40 or "." in self.tmdb_api_key
 
-    def _get_tmdb_auth(self) -> tuple[dict[str, str], dict[str, Any]]:
+    def _get_tmdb_auth(self, custom_key: str | None = None) -> tuple[dict[str, str], dict[str, Any]]:
         """Return (headers, params) tuple for TMDb authentication."""
-        if not self.tmdb_api_key:
+        key = (custom_key or self.tmdb_api_key or "").strip().strip("\"'")
+        if key.lower().startswith("bearer "):
+            key = key[7:].strip()
+        if not key:
             return {}, {}
-        if self._is_bearer_token():
-            return {"Authorization": f"Bearer {self.tmdb_api_key}"}, {}
-        return {}, {"api_key": self.tmdb_api_key}
+        if key.startswith("eyJ") or len(key) > 40 or "." in key:
+            return {"Authorization": f"Bearer {key}"}, {}
+        return {}, {"api_key": key}
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Ensure an active aiohttp session."""
@@ -107,7 +110,7 @@ class MetadataEnricher:
             _LOGGER.debug("Cinemeta title search failed for %s: %s", title, err)
         return None
 
-    async def enrich_movie(self, movie: Movie) -> Movie:
+    async def enrich_movie(self, movie: Movie, api_key: str | None = None) -> Movie:
         """Enrich movie details using TMDb or free fallback."""
         cache_key = f"movie:{movie.id}"
         if cache_key in self._cache:
@@ -115,8 +118,9 @@ class MetadataEnricher:
             return movie
 
         metadata: dict[str, Any] | None = None
-        if self.tmdb_api_key:
-            metadata = await self._fetch_tmdb_movie(movie)
+        key_to_use = api_key or self.tmdb_api_key
+        if key_to_use:
+            metadata = await self._fetch_tmdb_movie(movie, key_to_use)
 
         if not metadata and not movie.imdb_id:
             movie.imdb_id = await self._search_cinemeta_imdb_id("movie", movie.title)
@@ -130,7 +134,7 @@ class MetadataEnricher:
 
         return movie
 
-    async def enrich_tv_series(self, series: TvSeries) -> TvSeries:
+    async def enrich_tv_series(self, series: TvSeries, api_key: str | None = None) -> TvSeries:
         """Enrich TV series details using TMDb or free fallback."""
         cache_key = f"tv:{series.id}"
         if cache_key in self._cache:
@@ -138,8 +142,9 @@ class MetadataEnricher:
             return series
 
         metadata: dict[str, Any] | None = None
-        if self.tmdb_api_key:
-            metadata = await self._fetch_tmdb_tv(series)
+        key_to_use = api_key or self.tmdb_api_key
+        if key_to_use:
+            metadata = await self._fetch_tmdb_tv(series, key_to_use)
 
         if not metadata and not series.imdb_id:
             series.imdb_id = await self._search_cinemeta_imdb_id("series", series.title)
@@ -156,9 +161,9 @@ class MetadataEnricher:
 
         return series
 
-    async def _fetch_tmdb_movie(self, movie: Movie) -> dict[str, Any] | None:
-        """Fetch movie metadata from TMDb."""
-        auth_headers, auth_params = self._get_tmdb_auth()
+    async def _fetch_tmdb_movie(self, movie: Movie, api_key: str | None = None) -> dict[str, Any] | None:
+        """Fetch movie metadata from TMDb including certification."""
+        auth_headers, auth_params = self._get_tmdb_auth(api_key)
         try:
             tmdb_id = movie.tmdb_id
             if not tmdb_id:
@@ -175,15 +180,15 @@ class MetadataEnricher:
                 return None
 
             detail_url = f"{TMDB_BASE_URL}/movie/{tmdb_id}"
-            params = {"language": "it-IT", "append_to_response": "credits", **auth_params}
+            params = {"language": "it-IT", "append_to_response": "credits,release_dates", **auth_params}
             return await self._get_json(detail_url, params=params, headers=auth_headers)
         except Exception as err:
             _LOGGER.debug("TMDb fetch movie failed for %s: %s", movie.title, err)
             return None
 
-    async def _fetch_tmdb_tv(self, series: TvSeries) -> dict[str, Any] | None:
-        """Fetch TV series metadata from TMDb."""
-        auth_headers, auth_params = self._get_tmdb_auth()
+    async def _fetch_tmdb_tv(self, series: TvSeries, api_key: str | None = None) -> dict[str, Any] | None:
+        """Fetch TV series metadata from TMDb including content ratings."""
+        auth_headers, auth_params = self._get_tmdb_auth(api_key)
         try:
             tmdb_id = series.tmdb_id
             if not tmdb_id:
@@ -200,11 +205,12 @@ class MetadataEnricher:
                 return None
 
             detail_url = f"{TMDB_BASE_URL}/tv/{tmdb_id}"
-            params = {"language": "it-IT", "append_to_response": "credits", **auth_params}
+            params = {"language": "it-IT", "append_to_response": "credits,content_ratings", **auth_params}
             return await self._get_json(detail_url, params=params, headers=auth_headers)
         except Exception as err:
             _LOGGER.debug("TMDb fetch TV series failed for %s: %s", series.title, err)
             return None
+
 
     async def _fetch_cinemeta(self, media_type: str, imdb_id: str) -> dict[str, Any] | None:
         """Fetch metadata from Cinemeta using IMDb ID."""
@@ -270,6 +276,20 @@ class MetadataEnricher:
         if meta.get("runtime") and not movie.duration:
             movie.duration = int(meta["runtime"])
 
+        # Extract certification (Italian priority, then US)
+        release_dates = meta.get("release_dates", {})
+        if isinstance(release_dates, dict) and "results" in release_dates:
+            results = release_dates.get("results", [])
+            it_entry = next((r for r in results if r.get("iso_3166_1") == "IT"), None)
+            us_entry = next((r for r in results if r.get("iso_3166_1") == "US"), None)
+            target_entry = it_entry or us_entry
+            if target_entry:
+                for rd in target_entry.get("release_dates", []):
+                    cert = rd.get("certification")
+                    if cert:
+                        movie.certification = cert
+                        break
+
         if meta.get("genres"):
             genres = []
             for g in meta["genres"]:
@@ -321,6 +341,16 @@ class MetadataEnricher:
             with contextlib.suppress(Exception):
                 series.rating = round(float(meta["imdbRating"]), 1)
 
+        # Extract TV content ratings (Italian priority, then US)
+        content_ratings = meta.get("content_ratings", {})
+        if isinstance(content_ratings, dict) and "results" in content_ratings:
+            results = content_ratings.get("results", [])
+            it_entry = next((r for r in results if r.get("iso_3166_1") == "IT"), None)
+            us_entry = next((r for r in results if r.get("iso_3166_1") == "US"), None)
+            target = it_entry or us_entry
+            if target and target.get("rating"):
+                series.certification = target.get("rating")
+
         if meta.get("genres"):
             genres = []
             for g in meta["genres"]:
@@ -330,6 +360,7 @@ class MetadataEnricher:
                     genres.append(g)
             if genres:
                 series.genres = genres
+
 
     async def enrich_tv_season(self, series_tmdb_id: int | None, season: Any) -> Any:
         """Enrich TV season episodes with TMDb episode titles, overviews, and screenshots."""

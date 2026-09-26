@@ -15,3 +15,6 @@ configuration:
   stream_port:
     name: "Stream Proxy Port"
     description: "HTTP port used to serve proxied HLS video streams on the local network."
+  profiles:
+    name: "Family Account Profiles"
+    description: "List of family members/profiles. Each profile has individual lists (In Progress, Watched, Favorites), age rating filter, and personal TMDb / Trakt.tv credentials."

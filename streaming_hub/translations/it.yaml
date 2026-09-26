@@ -15,3 +15,6 @@ configuration:
   stream_port:
     name: "Porta Proxy Streaming"
     description: "Porta HTTP utilizzata per servire i flussi video HLS ai dispositivi nella rete locale."
+  profiles:
+    name: "Profili Family Account"
+    description: "Elenco delle persone/profili della famiglia. Ciascun profilo ha le proprie liste (Iniziati, Visti, Preferiti), filtro di classificazione per età, e credenziali personali TMDb e Trakt.tv."

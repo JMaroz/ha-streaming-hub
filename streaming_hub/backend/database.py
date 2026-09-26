@@ -53,7 +53,7 @@ class MediaDatabase:
         await asyncio.to_thread(self._init_sync)
 
     def _init_sync(self) -> None:
-        """Synchronously create tables."""
+        """Synchronously create tables and perform migrations."""
         _LOGGER.info("Initializing persistent SQLite database at %s", self._db_path)
         with self._get_connection() as conn:
             conn.executescript("""
@@ -69,12 +69,14 @@ class MediaDatabase:
                     genres TEXT,
                     duration INTEGER,
                     rating REAL,
+                    certification TEXT,
                     cast_list TEXT,
                     director TEXT,
                     streamingcommunity_url TEXT,
                     cb01_url TEXT,
                     tmdb_id INTEGER,
                     imdb_id TEXT,
+                    trakt_id INTEGER,
                     catalogs TEXT,
                     sources TEXT,
                     raw_json TEXT,
@@ -97,6 +99,7 @@ class MediaDatabase:
 
                 CREATE TABLE IF NOT EXISTS watch_history (
                     id TEXT PRIMARY KEY,
+                    profile_id TEXT NOT NULL DEFAULT 'default',
                     media_id TEXT NOT NULL,
                     title TEXT NOT NULL,
                     poster_url TEXT,
@@ -108,16 +111,48 @@ class MediaDatabase:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 
-                CREATE INDEX IF NOT EXISTS idx_history_updated ON watch_history(updated_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_history_updated ON watch_history(profile_id, updated_at DESC);
 
                 CREATE TABLE IF NOT EXISTS favorites (
-                    title_id TEXT PRIMARY KEY,
+                    id TEXT PRIMARY KEY,
+                    profile_id TEXT NOT NULL DEFAULT 'default',
+                    title_id TEXT NOT NULL,
                     media_type TEXT NOT NULL,
                     title TEXT NOT NULL,
                     poster_url TEXT,
                     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
+
+                CREATE INDEX IF NOT EXISTS idx_favorites_profile ON favorites(profile_id, added_at DESC);
             """)
+
+            # Safe SQLite Schema Migrations for existing user databases
+            try:
+                conn.execute("ALTER TABLE titles ADD COLUMN certification TEXT;")
+            except Exception:
+                pass
+
+            try:
+                conn.execute("ALTER TABLE titles ADD COLUMN trakt_id INTEGER;")
+            except Exception:
+                pass
+
+            try:
+                conn.execute("ALTER TABLE watch_history ADD COLUMN profile_id TEXT NOT NULL DEFAULT 'default';")
+            except Exception:
+                pass
+
+            try:
+                conn.execute("ALTER TABLE favorites ADD COLUMN profile_id TEXT NOT NULL DEFAULT 'default';")
+            except Exception:
+                pass
+
+            try:
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_history_profile_media ON watch_history(profile_id, media_id);")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_favorites_profile_title ON favorites(profile_id, title_id);")
+            except Exception:
+                pass
+
 
     async def save_title(self, item: Movie | TvSeries) -> None:
         """Persist a movie or TV series title with metadata to SQLite."""
@@ -139,10 +174,10 @@ class MediaDatabase:
                 INSERT INTO titles (
                     id, media_type, title, original_title, year,
                     poster_url, backdrop_url, description, genres,
-                    duration, rating, cast_list, director,
+                    duration, rating, certification, cast_list, director,
                     streamingcommunity_url, cb01_url,
-                    tmdb_id, imdb_id, catalogs, sources, raw_json, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    tmdb_id, imdb_id, trakt_id, catalogs, sources, raw_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(id) DO UPDATE SET
                     title=excluded.title,
                     original_title=excluded.original_title,
@@ -153,12 +188,14 @@ class MediaDatabase:
                     genres=excluded.genres,
                     duration=COALESCE(excluded.duration, titles.duration),
                     rating=COALESCE(excluded.rating, titles.rating),
+                    certification=COALESCE(excluded.certification, titles.certification),
                     cast_list=excluded.cast_list,
                     director=COALESCE(excluded.director, titles.director),
                     streamingcommunity_url=COALESCE(excluded.streamingcommunity_url, titles.streamingcommunity_url),
                     cb01_url=COALESCE(excluded.cb01_url, titles.cb01_url),
                     tmdb_id=COALESCE(excluded.tmdb_id, titles.tmdb_id),
                     imdb_id=COALESCE(excluded.imdb_id, titles.imdb_id),
+                    trakt_id=COALESCE(excluded.trakt_id, titles.trakt_id),
                     catalogs=excluded.catalogs,
                     sources=excluded.sources,
                     raw_json=excluded.raw_json,
@@ -176,17 +213,20 @@ class MediaDatabase:
                     genres_json,
                     getattr(item, "duration", None),
                     item.rating,
+                    getattr(item, "certification", None),
                     cast_json,
                     item.director,
                     getattr(item, "streamingcommunity_url", None),
                     getattr(item, "cb01_url", None),
                     item.tmdb_id,
                     item.imdb_id,
+                    getattr(item, "trakt_id", None),
                     catalogs_json,
                     sources_json,
                     raw_json,
                 ),
             )
+
 
     async def get_title(self, title_id: str) -> dict[str, Any] | None:
         """Retrieve cached title dictionary from SQLite."""
@@ -328,8 +368,9 @@ class MediaDatabase:
         episode_number: int | None = None,
         progress_seconds: float = 0,
         duration_seconds: float = 0,
+        profile_id: str = "default",
     ) -> None:
-        """Save playback progress into watch_history table."""
+        """Save playback progress into watch_history table scoped by profile_id."""
         async with self._lock:
             await asyncio.to_thread(
                 self._save_watch_progress_sync,
@@ -341,6 +382,7 @@ class MediaDatabase:
                 episode_number,
                 progress_seconds,
                 duration_seconds,
+                profile_id,
             )
 
     def _save_watch_progress_sync(
@@ -353,16 +395,18 @@ class MediaDatabase:
         episode_number: int | None,
         progress_seconds: float,
         duration_seconds: float,
+        profile_id: str,
     ) -> None:
         """Synchronously upsert watch history."""
-        hist_id = f"{media_id}_s{season_number}e{episode_number}" if season_number and episode_number else media_id
+        base_id = f"{media_id}_s{season_number}e{episode_number}" if season_number and episode_number else media_id
+        hist_id = f"{profile_id}:{base_id}"
         with self._get_connection() as conn:
             conn.execute(
                 """
                 INSERT INTO watch_history (
-                    id, media_id, title, poster_url, media_type,
+                    id, profile_id, media_id, title, poster_url, media_type,
                     season_number, episode_number, progress_seconds, duration_seconds, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(id) DO UPDATE SET
                     progress_seconds=excluded.progress_seconds,
                     duration_seconds=excluded.duration_seconds,
@@ -370,6 +414,7 @@ class MediaDatabase:
                 """,
                 (
                     hist_id,
+                    profile_id,
                     media_id,
                     title,
                     poster_url,
@@ -381,12 +426,12 @@ class MediaDatabase:
                 ),
             )
 
-    async def get_watch_history(self, limit: int = 30) -> list[dict[str, Any]]:
-        """Retrieve recent watch history."""
+    async def get_watch_history(self, profile_id: str = "default", limit: int = 30) -> list[dict[str, Any]]:
+        """Retrieve recent watch history for a profile."""
         async with self._lock:
-            return await asyncio.to_thread(self._get_watch_history_sync, limit)
+            return await asyncio.to_thread(self._get_watch_history_sync, profile_id, limit)
 
-    def _get_watch_history_sync(self, limit: int) -> list[dict[str, Any]]:
+    def _get_watch_history_sync(self, profile_id: str, limit: int) -> list[dict[str, Any]]:
         """Synchronously get watch history."""
         with self._get_connection() as conn:
             cursor = conn.execute(
@@ -394,20 +439,21 @@ class MediaDatabase:
                 SELECT id, media_id, title, poster_url, media_type,
                        season_number, episode_number, progress_seconds, duration_seconds, updated_at
                 FROM watch_history
+                WHERE profile_id = ?
                 ORDER BY updated_at DESC
                 LIMIT ?;
                 """,
-                (limit,),
+                (profile_id, limit),
             )
             return [dict(row) for row in cursor.fetchall()]
 
-    async def get_continue_watching(self, limit: int = 20) -> list[dict[str, Any]]:
+    async def get_continue_watching(self, profile_id: str = "default", limit: int = 20) -> list[dict[str, Any]]:
         """Retrieve deduplicated in-progress movies and TV series for 'Continua a guardare'."""
         async with self._lock:
-            return await asyncio.to_thread(self._get_continue_watching_sync, limit)
+            return await asyncio.to_thread(self._get_continue_watching_sync, profile_id, limit)
 
-    def _get_continue_watching_sync(self, limit: int) -> list[dict[str, Any]]:
-        """Synchronously get continue watching list."""
+    def _get_continue_watching_sync(self, profile_id: str, limit: int) -> list[dict[str, Any]]:
+        """Synchronously get continue watching list for a profile."""
         with self._get_connection() as conn:
             query = """
                 SELECT h.id, h.media_id, h.title, h.poster_url, h.media_type,
@@ -418,13 +464,15 @@ class MediaDatabase:
                 INNER JOIN (
                     SELECT media_id, MAX(updated_at) as max_updated
                     FROM watch_history
+                    WHERE profile_id = ?
                     GROUP BY media_id
                 ) latest ON h.media_id = latest.media_id AND h.updated_at = latest.max_updated
                 LEFT JOIN titles t ON h.media_id = t.id
+                WHERE h.profile_id = ?
                 ORDER BY h.updated_at DESC
                 LIMIT ?;
             """
-            cursor = conn.execute(query, (limit * 2,))
+            cursor = conn.execute(query, (profile_id, profile_id, limit * 2))
             rows = [dict(r) for r in cursor.fetchall()]
 
             results: list[dict[str, Any]] = []
@@ -508,6 +556,63 @@ class MediaDatabase:
 
             return results
 
+    async def get_watched_history(self, profile_id: str = "default", limit: int = 20) -> list[dict[str, Any]]:
+        """Retrieve completed / watched titles (progress >= 90%) for 'Visti di Recente'."""
+        async with self._lock:
+            return await asyncio.to_thread(self._get_watched_history_sync, profile_id, limit)
+
+    def _get_watched_history_sync(self, profile_id: str, limit: int) -> list[dict[str, Any]]:
+        """Synchronously get watched list for a profile."""
+        with self._get_connection() as conn:
+            query = """
+                SELECT h.id, h.media_id, h.title, h.poster_url, h.media_type,
+                       h.season_number, h.episode_number, h.progress_seconds,
+                       h.duration_seconds, h.updated_at,
+                       t.backdrop_url, t.poster_url as title_poster, t.title as title_canonical
+                FROM watch_history h
+                INNER JOIN (
+                    SELECT media_id, MAX(updated_at) as max_updated
+                    FROM watch_history
+                    WHERE profile_id = ?
+                    GROUP BY media_id
+                ) latest ON h.media_id = latest.media_id AND h.updated_at = latest.max_updated
+                LEFT JOIN titles t ON h.media_id = t.id
+                WHERE h.profile_id = ?
+                ORDER BY h.updated_at DESC
+                LIMIT ?;
+            """
+            cursor = conn.execute(query, (profile_id, profile_id, limit * 2))
+            rows = [dict(r) for r in cursor.fetchall()]
+
+            results: list[dict[str, Any]] = []
+            for r in rows:
+                duration = float(r.get("duration_seconds") or 0)
+                progress = float(r.get("progress_seconds") or 0)
+                percent = round((progress / duration * 100), 1) if duration > 0 else 0
+                title_name = r.get("title_canonical") or r.get("title") or "Senza Titolo"
+                poster = r.get("title_poster") or r.get("poster_url")
+                backdrop = r.get("backdrop_url")
+
+                # Count as watched if percent >= 85% or duration > 300 and less than 3 min remaining
+                is_watched = percent >= 85 or (duration > 300 and (duration - progress) < 180)
+                if not is_watched:
+                    continue
+
+                results.append({
+                    "media_id": r["media_id"],
+                    "title": title_name,
+                    "media_type": r.get("media_type", "movie"),
+                    "poster_url": poster,
+                    "backdrop_url": backdrop,
+                    "season_number": r.get("season_number"),
+                    "episode_number": r.get("episode_number"),
+                    "progress_percent": 100.0,
+                    "updated_at": r["updated_at"],
+                })
+                if len(results) >= limit:
+                    break
+            return results
+
     def _find_next_episode_sync(self, conn: sqlite3.Connection, series_id: str, season_num: int, ep_num: int) -> dict[str, Any] | None:
         """Find the next episode in the current season or the first episode of the next season."""
         s_cursor = conn.execute("SELECT episodes_json FROM seasons WHERE series_id = ? AND season_number = ?", (series_id, season_num))
@@ -554,22 +659,22 @@ class MediaDatabase:
                         return ep.get("title")
         return None
 
-    async def delete_watch_history(self, media_id: str) -> None:
-        """Remove a title and all its episodes from watch history."""
+    async def delete_watch_history(self, media_id: str, profile_id: str = "default") -> None:
+        """Remove a title and all its episodes from watch history for a profile."""
         async with self._lock:
-            await asyncio.to_thread(self._delete_watch_history_sync, media_id)
+            await asyncio.to_thread(self._delete_watch_history_sync, media_id, profile_id)
 
-    def _delete_watch_history_sync(self, media_id: str) -> None:
-        """Synchronously delete history by media_id."""
+    def _delete_watch_history_sync(self, media_id: str, profile_id: str) -> None:
+        """Synchronously delete history by media_id and profile_id."""
         with self._get_connection() as conn:
-            conn.execute("DELETE FROM watch_history WHERE media_id = ?", (media_id,))
+            conn.execute("DELETE FROM watch_history WHERE media_id = ? AND profile_id = ?", (media_id, profile_id))
 
-    async def get_media_progress(self, media_id: str) -> dict[str, Any] | None:
-        """Get latest watch progress for a media_id."""
+    async def get_media_progress(self, media_id: str, profile_id: str = "default") -> dict[str, Any] | None:
+        """Get latest watch progress for a media_id and profile."""
         async with self._lock:
-            return await asyncio.to_thread(self._get_media_progress_sync, media_id)
+            return await asyncio.to_thread(self._get_media_progress_sync, media_id, profile_id)
 
-    def _get_media_progress_sync(self, media_id: str) -> dict[str, Any] | None:
+    def _get_media_progress_sync(self, media_id: str, profile_id: str) -> dict[str, Any] | None:
         """Synchronously get latest progress."""
         with self._get_connection() as conn:
             cursor = conn.execute(
@@ -577,40 +682,79 @@ class MediaDatabase:
                 SELECT id, media_id, title, poster_url, media_type,
                        season_number, episode_number, progress_seconds, duration_seconds, updated_at
                 FROM watch_history
-                WHERE media_id = ?
+                WHERE media_id = ? AND profile_id = ?
                 ORDER BY updated_at DESC
                 LIMIT 1;
                 """,
-                (media_id,),
+                (media_id, profile_id),
             )
             row = cursor.fetchone()
             return dict(row) if row else None
 
-    async def toggle_favorite(self, title_id: str, media_type: str, title: str, poster_url: str | None) -> bool:
-        """Toggle favorite status. Returns True if now favorite, False if removed."""
+    async def toggle_favorite(
+        self,
+        title_id: str,
+        media_type: str,
+        title: str,
+        poster_url: str | None,
+        profile_id: str = "default",
+    ) -> bool:
+        """Toggle favorite status for a profile. Returns True if now favorite, False if removed."""
         async with self._lock:
-            return await asyncio.to_thread(self._toggle_favorite_sync, title_id, media_type, title, poster_url)
+            return await asyncio.to_thread(self._toggle_favorite_sync, title_id, media_type, title, poster_url, profile_id)
 
-    def _toggle_favorite_sync(self, title_id: str, media_type: str, title: str, poster_url: str | None) -> bool:
+    def _toggle_favorite_sync(
+        self,
+        title_id: str,
+        media_type: str,
+        title: str,
+        poster_url: str | None,
+        profile_id: str,
+    ) -> bool:
         """Synchronously toggle favorite."""
+        fav_id = f"{profile_id}:{title_id}"
         with self._get_connection() as conn:
-            cursor = conn.execute("SELECT title_id FROM favorites WHERE title_id = ?", (title_id,))
+            cursor = conn.execute("SELECT id FROM favorites WHERE profile_id = ? AND title_id = ?", (profile_id, title_id))
             if cursor.fetchone():
-                conn.execute("DELETE FROM favorites WHERE title_id = ?", (title_id,))
+                conn.execute("DELETE FROM favorites WHERE profile_id = ? AND title_id = ?", (profile_id, title_id))
                 return False
             conn.execute(
-                "INSERT INTO favorites (title_id, media_type, title, poster_url, added_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
-                (title_id, media_type, title, poster_url),
+                """
+                INSERT INTO favorites (id, profile_id, title_id, media_type, title, poster_url, added_at)
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(id) DO NOTHING;
+                """,
+                (fav_id, profile_id, title_id, media_type, title, poster_url),
             )
             return True
 
-    async def get_favorites(self) -> list[dict[str, Any]]:
-        """Retrieve all user favorites."""
+    async def get_favorites(self, profile_id: str = "default") -> list[dict[str, Any]]:
+        """Retrieve all user favorites for a profile."""
         async with self._lock:
-            return await asyncio.to_thread(self._get_favorites_sync)
+            return await asyncio.to_thread(self._get_favorites_sync, profile_id)
 
-    def _get_favorites_sync(self) -> list[dict[str, Any]]:
-        """Synchronously get all favorites."""
+    def _get_favorites_sync(self, profile_id: str) -> list[dict[str, Any]]:
+        """Synchronously get all favorites for a profile."""
         with self._get_connection() as conn:
-            cursor = conn.execute("SELECT title_id, media_type, title, poster_url, added_at FROM favorites ORDER BY added_at DESC")
+            cursor = conn.execute(
+                """
+                SELECT title_id, media_type, title, poster_url, added_at
+                FROM favorites
+                WHERE profile_id = ?
+                ORDER BY added_at DESC
+                """,
+                (profile_id,),
+            )
             return [dict(row) for row in cursor.fetchall()]
+
+    async def is_favorite(self, title_id: str, profile_id: str = "default") -> bool:
+        """Check if a title is favorited by profile."""
+        async with self._lock:
+            return await asyncio.to_thread(self._is_favorite_sync, title_id, profile_id)
+
+    def _is_favorite_sync(self, title_id: str, profile_id: str) -> bool:
+        """Synchronously check favorite status."""
+        with self._get_connection() as conn:
+            cursor = conn.execute("SELECT 1 FROM favorites WHERE profile_id = ? AND title_id = ? LIMIT 1", (profile_id, title_id))
+            return cursor.fetchone() is not None
+

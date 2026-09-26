@@ -22,12 +22,13 @@ from .database import MediaDatabase
 from .dns_resolver import DNS_DEFAULT
 from .ha_client import HACoreClient
 from .metadata import MetadataEnricher
-from .models import Movie, ProviderSource, TvSeries
+from .models import Movie, Profile, ProviderSource, TvSeries
 from .proxy import StreamProxy
 from .sources.cb01_source import CB01Source
 from .sources.detector import SourceDetector
 from .sources.manager import SourceManager
 from .sources.streamingcommunity_source import StreamingCommunitySource
+from .trakt_client import TraktClient
 from .utils import CatalogMerger
 
 _LOGGER = logging.getLogger("streaming_hub")
@@ -54,6 +55,7 @@ def load_options() -> dict[str, Any]:
         "tmdb_api_key": os.getenv("TMDB_API_KEY", ""),
         "stream_port": int(os.getenv("STREAM_PORT", "8099")),
         "custom_sources": parsed_sources,
+        "profiles": [],
     }
 
     if OPTIONS_FILE.exists():
@@ -88,7 +90,44 @@ def load_options() -> dict[str, Any]:
         normalized_sources.append({"url": cb_env, "type": "cb01", "name": "CB01", "enabled": True})
 
     options["custom_sources"] = normalized_sources
+
+    # Normalize profiles
+    raw_profiles = options.get("profiles") or []
+    normalized_profiles: list[Profile] = []
+    if isinstance(raw_profiles, list):
+        for p in raw_profiles:
+            if isinstance(p, dict) and p.get("name"):
+                pid = str(p.get("id") or p.get("name", "")).lower().replace(" ", "_")
+                # Inherit global tmdb_api_key if personal is empty
+                p_tmdb = str(p.get("tmdb_api_key", "")).strip() or str(options.get("tmdb_api_key", "")).strip()
+                normalized_profiles.append(
+                    Profile(
+                        id=pid,
+                        name=str(p["name"]).strip(),
+                        avatar=str(p.get("avatar") or "avatar_1"),
+                        rating_filter=str(p.get("rating_filter") or "ALL"),
+                        tmdb_api_key=p_tmdb,
+                        trakt_client_id=str(p.get("trakt_client_id") or "").strip(),
+                        trakt_access_token=str(p.get("trakt_access_token") or "").strip(),
+                        pin=str(p["pin"]).strip() if p.get("pin") else None,
+                    )
+                )
+
+    if not normalized_profiles:
+        # Default single profile fallback
+        normalized_profiles.append(
+            Profile(
+                id="default",
+                name="Principale",
+                avatar="avatar_1",
+                rating_filter="ALL",
+                tmdb_api_key=str(options.get("tmdb_api_key", "")).strip(),
+            )
+        )
+
+    options["profiles"] = normalized_profiles
     return options
+
 
 
 CONFIG = load_options()
@@ -210,6 +249,10 @@ class CastRequest(BaseModel):
     season_number: int | None = None
     episode_number: int | None = None
     seek_seconds: float = 0
+    profile_id: str = "default"
+    year: int | None = None
+    tmdb_id: int | None = None
+    imdb_id: str | None = None
 
 
 class TestSourceRequest(BaseModel):
@@ -226,6 +269,10 @@ class ProgressRequest(BaseModel):
     episode_number: int | None = None
     progress_seconds: float = 0
     duration_seconds: float = 0
+    profile_id: str = "default"
+    year: int | None = None
+    tmdb_id: int | None = None
+    imdb_id: str | None = None
 
 
 class FavoriteRequest(BaseModel):
@@ -233,6 +280,31 @@ class FavoriteRequest(BaseModel):
     media_type: str = "movie"
     title: str
     poster_url: str | None = None
+    profile_id: str = "default"
+    tmdb_id: int | None = None
+    imdb_id: str | None = None
+
+
+class TraktScrobbleRequest(BaseModel):
+    action: str  # "start", "pause", "stop"
+    media_type: str
+    title: str
+    year: int | None = None
+    tmdb_id: int | None = None
+    imdb_id: str | None = None
+    season_number: int | None = None
+    episode_number: int | None = None
+    progress_percent: float = 0
+    profile_id: str = "default"
+
+
+class TraktDeviceCodeRequest(BaseModel):
+    profile_id: str = "default"
+
+
+class TraktPollTokenRequest(BaseModel):
+    profile_id: str = "default"
+    device_code: str
 
 
 # Helpers
@@ -242,6 +314,68 @@ def get_ingress_path(request: Request) -> str:
     if ingress_hdr:
         return ingress_hdr.rstrip("/")
     return ""
+
+
+def get_profile_by_id(profile_id: str) -> Profile:
+    """Find profile by id or fallback to first/default profile."""
+    profiles: list[Profile] = CONFIG.get("profiles", [])
+    for p in profiles:
+        if p.id == profile_id:
+            return p
+    return profiles[0] if profiles else Profile(id="default", name="Principale")
+
+
+def get_profile_trakt_client(profile: Profile) -> TraktClient | None:
+    """Instantiate a TraktClient for profile if client_id is set."""
+    if not profile.trakt_client_id:
+        return None
+    return TraktClient(client_id=profile.trakt_client_id, access_token=profile.trakt_access_token)
+
+
+# Rating Hierarchy: T (0) -> 6+ (6) -> 14+ (14) -> 18+ (18) -> ALL (99)
+RATING_MAP: dict[str, int] = {
+    "T": 0, "0": 0, "G": 0, "TV-Y": 0, "TV-G": 0,
+    "6+": 6, "PG": 6, "TV-Y7": 6, "TV-PG": 6,
+    "14+": 14, "VM14": 14, "12+": 12, "PG-13": 13, "TV-14": 14, "16+": 16,
+    "18+": 18, "VM18": 18, "R": 17, "NC-17": 18, "TV-MA": 18,
+    "ALL": 99,
+}
+
+RESTRICTED_GENRES_FOR_KIDS = {"erotico", "horror", "splatter", "crime", "thriller", "giallo"}
+
+
+def is_title_allowed_for_profile(title_item: Movie | TvSeries | dict[str, Any], profile: Profile) -> bool:
+    """Determine if a title passes the profile's content classification filter."""
+    filter_val = profile.rating_filter.upper()
+    if filter_val in ("ALL", ""):
+        return True
+
+    max_allowed = RATING_MAP.get(filter_val, 99)
+
+    # Extract certification
+    if isinstance(title_item, dict):
+        cert = str(title_item.get("certification") or "").upper().strip()
+        genres = [str(g).lower() for g in title_item.get("genres") or []]
+    else:
+        cert = str(getattr(title_item, "certification", "") or "").upper().strip()
+        genres = [str(g).lower() for g in getattr(title_item, "genres", []) or []]
+
+    if cert:
+        score = RATING_MAP.get(cert)
+        if score is None:
+            # Check numbers like '14' in certification
+            clean_digits = "".join(ch for ch in cert if ch.isdigit())
+            score = int(clean_digits) if clean_digits else 0
+        return score <= max_allowed
+
+    # If certification is not yet known, inspect genres for restricted profiles
+    if max_allowed <= 6:
+        # Hide adult/horror genres for kids
+        if any(rg in " ".join(genres) for rg in RESTRICTED_GENRES_FOR_KIDS):
+            return False
+
+    return True
+
 
 
 # API Endpoints
@@ -314,16 +448,75 @@ async def get_players() -> list[dict[str, Any]]:
     ]
 
 
+@app.get("/api/profiles")
+async def get_profiles() -> list[dict[str, Any]]:
+    """Retrieve configured family profiles (without exposing private secrets)."""
+    profiles: list[Profile] = CONFIG.get("profiles", [])
+    return [p.to_dict(include_secrets=False) for p in profiles]
+
+
+@app.post("/api/trakt/auth/device-code")
+async def get_trakt_device_code(req: TraktDeviceCodeRequest) -> dict[str, Any]:
+    """Request a device code and verification URL from Trakt."""
+    profile = get_profile_by_id(req.profile_id)
+    if not profile.trakt_client_id:
+        raise HTTPException(status_code=400, detail="Trakt Client ID non configurato per questo profilo.")
+    trakt = TraktClient(client_id=profile.trakt_client_id)
+    res = await trakt.generate_device_code()
+    if not res:
+        raise HTTPException(status_code=502, detail="Impossibile contattare l'API di Trakt.tv.")
+    return res
+
+
+@app.post("/api/trakt/auth/token")
+async def poll_trakt_token(req: TraktPollTokenRequest) -> dict[str, Any]:
+    """Poll for Trakt access token once user verifies device code."""
+    profile = get_profile_by_id(req.profile_id)
+    if not profile.trakt_client_id:
+        raise HTTPException(status_code=400, detail="Trakt Client ID non configurato.")
+    trakt = TraktClient(client_id=profile.trakt_client_id)
+    token_res = await trakt.poll_device_token(req.device_code)
+    if not token_res or "access_token" not in token_res:
+        raise HTTPException(status_code=400, detail="Token non ancora autorizzato o errore di autenticazione.")
+    profile.trakt_access_token = token_res["access_token"]
+    return {"status": "ok", "access_token": token_res["access_token"]}
+
+
+@app.post("/api/trakt/scrobble")
+async def trakt_scrobble(req: TraktScrobbleRequest) -> dict[str, Any]:
+    """Send playback scrobble event to Trakt for active profile."""
+    profile = get_profile_by_id(req.profile_id)
+    trakt = get_profile_trakt_client(profile)
+    if not trakt or not trakt.is_authenticated:
+        return {"status": "ignored", "reason": "trakt_not_authenticated"}
+
+    success = await trakt.scrobble_action(
+        action=req.action,
+        media_type=req.media_type,
+        title=req.title,
+        year=req.year,
+        tmdb_id=req.tmdb_id,
+        imdb_id=req.imdb_id,
+        season_number=req.season_number,
+        episode_number=req.episode_number,
+        progress_percent=req.progress_percent,
+    )
+    return {"status": "ok", "scrobbled": success}
+
+
 @app.get("/api/catalog/latest")
 async def get_latest(
     type: str = Query("all", regex="^(all|movie|tv)$"),
     source: str = Query("all"),
     page: int = Query(1, ge=1),
+    profile_id: str = Query("default"),
 ) -> dict[str, Any]:
-    """Retrieve latest titles across enabled sources with cross-catalog unification."""
+    """Retrieve latest titles across enabled sources with rating filter for active profile."""
+    profile = get_profile_by_id(profile_id)
     items = await source_manager.get_latest(media_type=type, source_filter=source, page=page)
-    results = [item.to_dict() for item in items]
-    return {"page": page, "source": source, "results": results}
+    filtered = [item for item in items if is_title_allowed_for_profile(item, profile)]
+    results = [item.to_dict() for item in filtered]
+    return {"page": page, "source": source, "profile_id": profile.id, "results": results}
 
 
 @app.get("/api/catalog/search")
@@ -331,12 +524,15 @@ async def search_catalog(
     q: str = Query(..., min_length=1),
     type: str = Query("all", regex="^(all|movie|tv)$"),
     source: str = Query("all"),
+    profile_id: str = Query("default"),
 ) -> dict[str, Any]:
-    """Search catalog by title across enabled sources."""
+    """Search catalog by title across enabled sources filtered for active profile."""
+    profile = get_profile_by_id(profile_id)
     query = q.strip()
     items = await source_manager.search(query, media_type=type, source_filter=source)
-    results = [item.to_dict() for item in items]
-    return {"query": query, "source": source, "count": len(results), "results": results}
+    filtered = [item for item in items if is_title_allowed_for_profile(item, profile)]
+    results = [item.to_dict() for item in filtered]
+    return {"query": query, "source": source, "profile_id": profile.id, "count": len(results), "results": results}
 
 
 @app.get("/api/catalog/genres")
@@ -351,8 +547,10 @@ async def get_by_genre(
     type: str = Query("movie", regex="^(movie|tv)$"),
     source: str = Query("all"),
     page: int = Query(1, ge=1),
+    profile_id: str = Query("default"),
 ) -> dict[str, Any]:
     """Browse catalog by genre across sources with cached database fallback/merge."""
+    profile = get_profile_by_id(profile_id)
     live_items = await source_manager.get_by_genre(genre, media_type=type, source_filter=source, page=page)
     db_items = await db.get_titles_by_genre(genre, media_type=type, limit=30)
     if type == "tv":
@@ -360,16 +558,20 @@ async def get_by_genre(
     else:
         merged = CatalogMerger.merge_movie_lists(live_items, db_items)
 
-    results = [item.to_dict() for item in merged]
-    return {"genre": genre, "page": page, "source": source, "results": results}
+    filtered = [item for item in merged if is_title_allowed_for_profile(item, profile)]
+    results = [item.to_dict() for item in filtered]
+    return {"genre": genre, "page": page, "source": source, "profile_id": profile.id, "results": results}
 
 
 @app.get("/api/catalog/title/{media_type}/{title_id}")
-async def get_title_details(media_type: str, title_id: str) -> dict[str, Any]:
+async def get_title_details(media_type: str, title_id: str, profile_id: str = Query("default")) -> dict[str, Any]:
     """Fetch complete details, enriched metadata, and sources for a title with SQLite caching."""
+    profile = get_profile_by_id(profile_id)
     # Check SQLite cache first for instant response
     cached = await db.get_title(title_id)
     if cached:
+        # Check favorite status for this profile
+        cached["is_favorite"] = await db.is_favorite(title_id, profile_id=profile.id)
         return cached
 
     try:
@@ -378,11 +580,12 @@ async def get_title_details(media_type: str, title_id: str) -> dict[str, Any]:
         _LOGGER.error("Error fetching title %s: %s", title_id, err)
         raise HTTPException(status_code=404, detail=f"Titolo non trovato: {err}")
 
-    # Enrich with TMDb or Cinemeta
+    # Enrich with TMDb or Cinemeta using profile's personal TMDb key if configured
+    tmdb_key = profile.tmdb_api_key or CONFIG.get("tmdb_api_key")
     if isinstance(item, Movie):
-        await metadata_enricher.enrich_movie(item)
+        await metadata_enricher.enrich_movie(item, api_key=tmdb_key)
     elif isinstance(item, TvSeries):
-        await metadata_enricher.enrich_tv_series(item)
+        await metadata_enricher.enrich_tv_series(item, api_key=tmdb_key)
         # Cache any pre-loaded seasons/episodes
         for s in item.seasons:
             if s.episodes:
@@ -390,12 +593,15 @@ async def get_title_details(media_type: str, title_id: str) -> dict[str, Any]:
 
     # Persist in SQLite
     await db.save_title(item)
-    return item.to_dict()
+    data = item.to_dict()
+    data["is_favorite"] = await db.is_favorite(title_id, profile_id=profile.id)
+    return data
 
 
 @app.get("/api/catalog/seasons/{series_id}/{season_number}")
-async def get_season_episodes(series_id: str, season_number: int) -> dict[str, Any]:
+async def get_season_episodes(series_id: str, season_number: int, profile_id: str = Query("default")) -> dict[str, Any]:
     """Retrieve episodes for a specific TV series season with SQLite caching."""
+    profile = get_profile_by_id(profile_id)
     # Check SQLite cache first
     cached_season = await db.get_season(series_id, season_number)
     if cached_season and cached_season.episodes:
@@ -418,7 +624,7 @@ async def get_season_episodes(series_id: str, season_number: int) -> dict[str, A
 
 @app.post("/api/history")
 async def save_progress(req: ProgressRequest) -> dict[str, Any]:
-    """Save or update video watch progress in SQLite database."""
+    """Save or update video watch progress in SQLite database scoped by profile."""
     await db.save_watch_progress(
         media_id=req.media_id,
         title=req.title,
@@ -428,52 +634,112 @@ async def save_progress(req: ProgressRequest) -> dict[str, Any]:
         episode_number=req.episode_number,
         progress_seconds=req.progress_seconds,
         duration_seconds=req.duration_seconds,
+        profile_id=req.profile_id,
     )
+
+    # If Trakt is connected for profile, scrobble progress
+    profile = get_profile_by_id(req.profile_id)
+    trakt = get_profile_trakt_client(profile)
+    if trakt and trakt.is_authenticated and req.duration_seconds > 0:
+        percent = (req.progress_seconds / req.duration_seconds) * 100
+        action = "stop" if percent >= 80 else "pause"
+        asyncio.create_task(
+            trakt.scrobble_action(
+                action=action,
+                media_type=req.media_type,
+                title=req.title,
+                year=req.year,
+                tmdb_id=req.tmdb_id,
+                imdb_id=req.imdb_id,
+                season_number=req.season_number,
+                episode_number=req.episode_number,
+                progress_percent=percent,
+            )
+        )
+
     return {"status": "ok"}
 
 
 @app.get("/api/history")
-async def get_history(limit: int = Query(30, ge=1, le=100)) -> list[dict[str, Any]]:
-    """Retrieve user watch history from SQLite database."""
-    return await db.get_watch_history(limit=limit)
+async def get_history(
+    limit: int = Query(30, ge=1, le=100),
+    profile_id: str = Query("default"),
+) -> list[dict[str, Any]]:
+    """Retrieve user watch history from SQLite database for active profile."""
+    return await db.get_watch_history(profile_id=profile_id, limit=limit)
 
 
 @app.get("/api/history/continue")
-async def get_continue_watching(limit: int = Query(20, ge=1, le=50)) -> list[dict[str, Any]]:
-    """Retrieve curated continue watching list for home shelf."""
-    return await db.get_continue_watching(limit=limit)
+async def get_continue_watching(
+    limit: int = Query(20, ge=1, le=50),
+    profile_id: str = Query("default"),
+) -> list[dict[str, Any]]:
+    """Retrieve curated continue watching list for active profile."""
+    return await db.get_continue_watching(profile_id=profile_id, limit=limit)
+
+
+@app.get("/api/history/watched")
+async def get_watched_list(
+    limit: int = Query(30, ge=1, le=100),
+    profile_id: str = Query("default"),
+) -> list[dict[str, Any]]:
+    """Retrieve watched / completed titles for active profile."""
+    return await db.get_watched_history(profile_id=profile_id, limit=limit)
 
 
 @app.delete("/api/history/{media_id}")
-async def delete_history_item(media_id: str) -> dict[str, Any]:
-    """Remove a media title from watch history."""
-    await db.delete_watch_history(media_id)
+async def delete_history_item(
+    media_id: str,
+    profile_id: str = Query("default"),
+) -> dict[str, Any]:
+    """Remove a media title from watch history for active profile."""
+    await db.delete_watch_history(media_id, profile_id=profile_id)
     return {"status": "ok", "deleted": media_id}
 
 
 @app.get("/api/history/progress/{media_id}")
-async def get_media_progress(media_id: str) -> dict[str, Any]:
-    """Get latest watch progress for a title."""
-    progress = await db.get_media_progress(media_id)
+async def get_media_progress(
+    media_id: str,
+    profile_id: str = Query("default"),
+) -> dict[str, Any]:
+    """Get latest watch progress for a title and active profile."""
+    progress = await db.get_media_progress(media_id, profile_id=profile_id)
     return {"status": "ok", "progress": progress}
 
 
 @app.post("/api/favorites/toggle")
 async def toggle_favorite(req: FavoriteRequest) -> dict[str, Any]:
-    """Toggle a title as user favorite in SQLite database."""
+    """Toggle a title as user favorite in SQLite database for active profile."""
     is_fav = await db.toggle_favorite(
         title_id=req.title_id,
         media_type=req.media_type,
         title=req.title,
         poster_url=req.poster_url,
+        profile_id=req.profile_id,
     )
+
+    # Sync to Trakt watchlist if authenticated
+    profile = get_profile_by_id(req.profile_id)
+    trakt = get_profile_trakt_client(profile)
+    if trakt and trakt.is_authenticated:
+        asyncio.create_task(
+            trakt.sync_favorite(
+                media_type=req.media_type,
+                title=req.title,
+                tmdb_id=req.tmdb_id,
+                imdb_id=req.imdb_id,
+                is_favorite=is_fav,
+            )
+        )
+
     return {"status": "ok", "favorite": is_fav}
 
 
 @app.get("/api/favorites")
-async def get_favorites() -> list[dict[str, Any]]:
-    """Retrieve all user favorites from SQLite database."""
-    return await db.get_favorites()
+async def get_favorites(profile_id: str = Query("default")) -> list[dict[str, Any]]:
+    """Retrieve all user favorites from SQLite database for active profile."""
+    return await db.get_favorites(profile_id=profile_id)
+
 
 
 @app.post("/api/resolve")
@@ -561,6 +827,9 @@ async def cast_to_device(req: CastRequest) -> dict[str, Any]:
         )
 
     # Start active tracker to sync watch progress from Home Assistant Cast entity
+    cast_profile = get_profile_by_id(req.profile_id)
+    cast_trakt = get_profile_trakt_client(cast_profile)
+
     ha_client.start_cast_tracker(
         entity_id=actual_entity,
         media_id=req.media_id or "media",
@@ -571,7 +840,13 @@ async def cast_to_device(req: CastRequest) -> dict[str, Any]:
         episode_number=req.episode_number,
         db=db,
         seek_position=req.seek_seconds,
+        profile_id=req.profile_id,
+        trakt_client=cast_trakt,
+        year=req.year,
+        tmdb_id=req.tmdb_id,
+        imdb_id=req.imdb_id,
     )
+
 
     return {
         "success": True,

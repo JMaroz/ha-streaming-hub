@@ -17,8 +17,16 @@ options:
   log_level: "info"
   custom_sources: []
   custom_dns: "cloudflare"
-  tmdb_api_key: ""
   stream_port: 8099
+  tmdb_api_key: ""
+  profiles:
+    - id: "default"
+      name: "Principale"
+      avatar: "avatar_1"
+      rating_filter: "ALL"
+      tmdb_api_key: ""
+      trakt_client_id: ""
+      trakt_access_token: ""
 schema:
   log_level: "list(trace|debug|info|notice|warning|error|fatal)"
   custom_sources:
@@ -26,5 +34,15 @@ schema:
       type: "list(auto|streamingcommunity|cb01)?"
       name: "str?"
   custom_dns: "list(cloudflare|google|quad9|system)"
-  tmdb_api_key: "str?"
   stream_port: "port"
+  tmdb_api_key: "str?"
+  profiles:
+    - id: "str"
+      name: "str"
+      avatar: "list(avatar_1|avatar_2|avatar_3|avatar_4|avatar_5|avatar_6)?"
+      rating_filter: "list(ALL|18+|14+|6+|T)?"
+      tmdb_api_key: "str?"
+      trakt_client_id: "str?"
+      trakt_access_token: "str?"
+      pin: "str?"
+

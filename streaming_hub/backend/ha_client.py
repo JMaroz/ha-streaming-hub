@@ -346,6 +346,11 @@ class HACoreClient:
         episode_number: int | None,
         db: Any,
         seek_position: float = 0,
+        profile_id: str = "default",
+        trakt_client: Any | None = None,
+        year: int | None = None,
+        tmdb_id: int | None = None,
+        imdb_id: str | None = None,
     ) -> None:
         """Start background task to sync watch progress while playing on Cast device."""
         if entity_id in self._cast_trackers:
@@ -360,6 +365,7 @@ class HACoreClient:
             "season_number": season_number,
             "episode_number": episode_number,
             "seek_position": seek_position,
+            "profile_id": profile_id,
         }
 
         task = asyncio.create_task(
@@ -373,6 +379,11 @@ class HACoreClient:
                 episode_number,
                 db,
                 seek_position,
+                profile_id,
+                trakt_client,
+                year,
+                tmdb_id,
+                imdb_id,
             )
         )
         self._cast_trackers[entity_id] = task
@@ -388,12 +399,18 @@ class HACoreClient:
         episode_number: int | None,
         db: Any,
         seek_position: float,
+        profile_id: str = "default",
+        trakt_client: Any | None = None,
+        year: int | None = None,
+        tmdb_id: int | None = None,
+        imdb_id: str | None = None,
     ) -> None:
-        """Poll entity state and sync watch progress with SQLite database."""
-        _LOGGER.info("Starting Cast watch progress tracker for %s on %s", title, entity_id)
+        """Poll entity state and sync watch progress with SQLite database and Trakt."""
+        _LOGGER.info("Starting Cast watch progress tracker for %s on %s (profile: %s)", title, entity_id, profile_id)
         seek_done = seek_position <= 5
         idle_counter = 0
         has_started_playing = False
+        trakt_started = False
 
         # Wait initial 4 seconds for Cast receiver launch
         await asyncio.sleep(4)
@@ -427,6 +444,8 @@ class HACoreClient:
                     pos = attrs.get("media_position")
                     dur = attrs.get("media_duration")
                     if pos is not None and float(pos) > 0:
+                        pos_float = float(pos)
+                        dur_float = float(dur or 0)
                         await db.save_watch_progress(
                             media_id=media_id,
                             title=title,
@@ -434,15 +453,34 @@ class HACoreClient:
                             poster_url=poster_url,
                             season_number=season_number,
                             episode_number=episode_number,
-                            progress_seconds=float(pos),
-                            duration_seconds=float(dur or 0),
+                            progress_seconds=pos_float,
+                            duration_seconds=dur_float,
+                            profile_id=profile_id,
                         )
+
+                        # Trakt scrobble integration
+                        if trakt_client and trakt_client.is_authenticated:
+                            percent = (pos_float / dur_float * 100) if dur_float > 0 else 0
+                            if not trakt_started and state == "playing":
+                                trakt_started = True
+                                asyncio.create_task(
+                                    trakt_client.scrobble_action(
+                                        "start", media_type, title, year, tmdb_id, imdb_id, season_number, episode_number, percent
+                                    )
+                                )
                 elif state in ("off", "idle", "standby"):
                     idle_counter += 1
                     max_idle = 3 if has_started_playing else 8
                     if idle_counter >= max_idle:
                         _LOGGER.info("Cast device %s is %s, stopping tracker.", entity_id, state)
+                        if trakt_client and trakt_client.is_authenticated and trakt_started:
+                            asyncio.create_task(
+                                trakt_client.scrobble_action(
+                                    "stop", media_type, title, year, tmdb_id, imdb_id, season_number, episode_number, 100.0
+                                )
+                            )
                         break
+
                 else:
                     idle_counter += 1
                     if idle_counter >= 8:

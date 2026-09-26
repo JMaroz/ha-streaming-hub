@@ -1720,3 +1720,347 @@ body.cast-active {
     height: 48px;
   }
 }
+
+/* ==========================================================================
+   Family Accounts, Profiles & Netflix-Style UI Additions
+   ========================================================================== */
+
+/* Navbar Actions */
+.nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+/* Profile Pill & Dropdown */
+.profile-dropdown-wrapper {
+  position: relative;
+}
+
+.btn-profile-pill {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-color);
+  padding: 4px 12px 4px 6px;
+  border-radius: var(--radius-full);
+  color: var(--text-main);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.btn-profile-pill:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.nav-profile-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  max-width: 110px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dropdown-caret {
+  width: 14px;
+  height: 14px;
+  color: var(--text-dim);
+  transition: transform var(--transition-fast);
+}
+
+.profile-dropdown-wrapper.open .dropdown-caret {
+  transform: rotate(180deg);
+}
+
+/* Dropdown Menu */
+.profile-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: 260px;
+  background: rgba(18, 24, 38, 0.95);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6);
+  padding: 12px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dropdown-header {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  letter-spacing: 0.8px;
+  font-weight: 700;
+  padding: 6px 12px;
+}
+
+.profiles-list-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.profile-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.profile-item-row:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.profile-item-row.active {
+  background: rgba(99, 102, 241, 0.16);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+}
+
+.profile-item-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.profile-name-col {
+  display: flex;
+  flex-direction: column;
+}
+
+.profile-item-name {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.profile-rating-badge {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+.dropdown-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 6px 0;
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: var(--radius-md);
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  width: 100%;
+  text-align: left;
+}
+
+.dropdown-item:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.dropdown-item svg {
+  width: 16px;
+  height: 16px;
+  color: var(--primary);
+}
+
+/* Avatar Palettes */
+.profile-avatar-thumb {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.avatar-bg-1 { background: linear-gradient(135deg, #ef4444, #b91c1c); }
+.avatar-bg-2 { background: linear-gradient(135deg, #3b82f6, #1d4ed8); }
+.avatar-bg-3 { background: linear-gradient(135deg, #10b981, #047857); }
+.avatar-bg-4 { background: linear-gradient(135deg, #a855f7, #7e22ce); }
+.avatar-bg-5 { background: linear-gradient(135deg, #f59e0b, #d97706); }
+.avatar-bg-6 { background: linear-gradient(135deg, #ec4899, #be185d); }
+
+/* Favorite Heart Button & Icon */
+.btn-icon-only {
+  padding: 10px;
+  border-radius: var(--radius-md);
+}
+
+.heart-icon {
+  width: 18px;
+  height: 18px;
+  transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), stroke 0.2s ease, fill 0.2s ease;
+}
+
+.is-favorite .heart-icon,
+.btn-icon-only.active .heart-icon {
+  fill: #ef4444 !important;
+  stroke: #ef4444 !important;
+  transform: scale(1.15);
+}
+
+/* Horizontal Carousels / Shelves */
+.carousel-shelf {
+  margin-bottom: 40px;
+}
+
+.horizontal-scroll {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 6px 4px 16px 4px;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+.horizontal-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+
+.horizontal-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-full);
+}
+
+.horizontal-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.horizontal-scroll .media-card {
+  min-width: 180px;
+  max-width: 180px;
+  flex: 0 0 180px;
+}
+
+/* Netflix "Chi sta guardando?" Fullscreen Picker Modal */
+.profile-picker-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  background: rgba(11, 15, 25, 0.96);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.profile-picker-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 40px;
+  max-width: 900px;
+  padding: 40px 24px;
+  text-align: center;
+}
+
+.profile-picker-title {
+  font-size: 2.5rem;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  color: var(--text-main);
+}
+
+.profile-picker-grid {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 32px;
+  flex-wrap: wrap;
+}
+
+.profile-picker-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  cursor: pointer;
+  transition: transform var(--transition-normal);
+}
+
+.profile-picker-card:hover {
+  transform: translateY(-8px);
+}
+
+.profile-picker-avatar {
+  width: 120px;
+  height: 120px;
+  border-radius: var(--radius-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 3rem;
+  font-weight: 800;
+  color: #fff;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+  transition: border var(--transition-fast), box-shadow var(--transition-fast);
+  border: 3px solid transparent;
+}
+
+.profile-picker-card:hover .profile-picker-avatar {
+  border-color: #fff;
+  box-shadow: 0 16px 40px rgba(99, 102, 241, 0.4);
+}
+
+.profile-picker-card.active .profile-picker-avatar {
+  border-color: var(--primary);
+}
+
+.profile-picker-name {
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  transition: color var(--transition-fast);
+}
+
+.profile-picker-card:hover .profile-picker-name {
+  color: #fff;
+}
+
+.profile-picker-tag {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-dim);
+}
+
+.profile-picker-footer {
+  margin-top: 10px;
+}
+
+.profile-picker-hint {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  max-width: 500px;
+  line-height: 1.5;
+}
+

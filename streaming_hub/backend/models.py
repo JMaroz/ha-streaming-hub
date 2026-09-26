@@ -74,6 +74,8 @@ class Movie:
     streamingcommunity_url: str = ""
     tmdb_id: int | None = None
     imdb_id: str | None = None
+    trakt_id: int | None = None
+    certification: str | None = None
     catalogs: list[str] = field(default_factory=list)
 
     sources: list[ProviderSource] = field(default_factory=list)
@@ -95,12 +97,14 @@ class Movie:
             "genres": self.genres,
             "duration": self.duration,
             "rating": self.rating,
+            "certification": self.certification,
             "cast": self.cast,
             "director": self.director,
             "cb01_url": self.cb01_url,
             "streamingcommunity_url": self.streamingcommunity_url,
             "tmdb_id": self.tmdb_id,
             "imdb_id": self.imdb_id,
+            "trakt_id": self.trakt_id,
             "catalogs": self.catalogs,
             "sources": [s.to_dict() for s in self.sources],
             "added_at": self.added_at.isoformat() if self.added_at else None,
@@ -124,17 +128,20 @@ class Movie:
             genres=data.get("genres", []),
             duration=data.get("duration"),
             rating=data.get("rating"),
+            certification=data.get("certification"),
             cast=data.get("cast", []),
             director=data.get("director"),
             cb01_url=data.get("cb01_url", ""),
             streamingcommunity_url=data.get("streamingcommunity_url", ""),
             tmdb_id=data.get("tmdb_id"),
             imdb_id=data.get("imdb_id"),
+            trakt_id=data.get("trakt_id"),
             catalogs=data.get("catalogs", []),
             sources=sources,
             added_at=added_at,
             updated_at=updated_at,
         )
+
 
 
 @dataclass
@@ -217,6 +224,8 @@ class TvSeries:
     streamingcommunity_url: str = ""
     tmdb_id: int | None = None
     imdb_id: str | None = None
+    trakt_id: int | None = None
+    certification: str | None = None
     catalogs: list[str] = field(default_factory=list)
 
     seasons: list[TvSeason] = field(default_factory=list)
@@ -237,12 +246,14 @@ class TvSeries:
             "description": self.description,
             "genres": self.genres,
             "rating": self.rating,
+            "certification": self.certification,
             "cast": self.cast,
             "director": self.director,
             "cb01_url": self.cb01_url,
             "streamingcommunity_url": self.streamingcommunity_url,
             "tmdb_id": self.tmdb_id,
             "imdb_id": self.imdb_id,
+            "trakt_id": self.trakt_id,
             "catalogs": self.catalogs,
             "seasons": [s.to_dict() for s in self.seasons],
             "added_at": self.added_at.isoformat() if self.added_at else None,
@@ -264,17 +275,67 @@ class TvSeries:
             description=data.get("description"),
             genres=data.get("genres", []),
             rating=data.get("rating"),
+            certification=data.get("certification"),
             cast=data.get("cast", []),
             director=data.get("director"),
             cb01_url=data.get("cb01_url", ""),
             streamingcommunity_url=data.get("streamingcommunity_url", ""),
             tmdb_id=data.get("tmdb_id"),
             imdb_id=data.get("imdb_id"),
+            trakt_id=data.get("trakt_id"),
             catalogs=data.get("catalogs", []),
             seasons=[TvSeason.from_dict(s) for s in data.get("seasons", [])],
             added_at=added_at,
             updated_at=updated_at,
         )
+
+
+@dataclass
+class Profile:
+    """A user profile within the Family Account."""
+
+    id: str
+    name: str
+    avatar: str = "avatar_1"
+    rating_filter: str = "ALL"  # ALL, 18+, 14+, 6+, T
+    tmdb_api_key: str = ""
+    trakt_client_id: str = ""
+    trakt_access_token: str = ""
+    pin: str | None = None
+
+    def to_dict(self, include_secrets: bool = False) -> dict[str, Any]:
+        """Convert profile to dict, omitting sensitive keys unless requested."""
+        data: dict[str, Any] = {
+            "id": self.id,
+            "name": self.name,
+            "avatar": self.avatar,
+            "rating_filter": self.rating_filter,
+            "has_pin": bool(self.pin),
+            "tmdb_configured": bool(self.tmdb_api_key),
+            "trakt_configured": bool(self.trakt_client_id),
+            "trakt_authenticated": bool(self.trakt_access_token),
+        }
+        if include_secrets:
+            data["tmdb_api_key"] = self.tmdb_api_key
+            data["trakt_client_id"] = self.trakt_client_id
+            data["trakt_access_token"] = self.trakt_access_token
+            data["pin"] = self.pin
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Profile:
+        """Create Profile from dictionary."""
+        return cls(
+            id=str(data.get("id", "default")),
+            name=str(data.get("name", "Principale")),
+            avatar=str(data.get("avatar", "avatar_1")),
+            rating_filter=str(data.get("rating_filter", "ALL")),
+            tmdb_api_key=str(data.get("tmdb_api_key", "")).strip(),
+            trakt_client_id=str(data.get("trakt_client_id", "")).strip(),
+            trakt_access_token=str(data.get("trakt_access_token", "")).strip(),
+            pin=str(data["pin"]).strip() if data.get("pin") else None,
+        )
+
 
 
 @dataclass

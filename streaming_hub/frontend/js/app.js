@@ -7,6 +7,9 @@
 
   // Application State
   const state = {
+    activeProfileId: localStorage.getItem("streaming_hub_active_profile_id") || "default",
+    profiles: [],
+    favoritesSet: new Set(),
     activeType: "all",
     activeGenre: null,
     activeSource: "all",
@@ -45,9 +48,32 @@
 
   // DOM Elements
   const elements = {
+    // Profile controls
+    profileDropdownWrapper: document.getElementById("profile-dropdown-wrapper"),
+    btnProfilePill: document.getElementById("btn-profile-pill"),
+    navProfileAvatar: document.getElementById("nav-profile-avatar"),
+    navProfileName: document.getElementById("nav-profile-name"),
+    profileDropdownMenu: document.getElementById("profile-dropdown-menu"),
+    profilesListMenu: document.getElementById("profiles-list-menu"),
+    btnDropdownSwitch: document.getElementById("btn-dropdown-switch"),
+    btnDropdownFavorites: document.getElementById("btn-dropdown-favorites"),
+    btnDropdownWatched: document.getElementById("btn-dropdown-watched"),
+
+    // Profile Picker Modal
+    profilePickerModal: document.getElementById("profile-picker-modal"),
+    profilePickerGrid: document.getElementById("profile-picker-grid"),
+
+    // Carousels / Shelves
     continueSection: document.getElementById("continue-section"),
     continueRow: document.getElementById("continue-row"),
     continueCount: document.getElementById("continue-count"),
+    favoritesSection: document.getElementById("favorites-section"),
+    favoritesRow: document.getElementById("favorites-row"),
+    favoritesCount: document.getElementById("favorites-count"),
+    watchedSection: document.getElementById("watched-section"),
+    watchedRow: document.getElementById("watched-row"),
+    watchedCount: document.getElementById("watched-count"),
+
     btnRestartTrigger: document.getElementById("btn-restart-trigger"),
     brandLogo: document.getElementById("brand-logo"),
     navTabs: document.querySelectorAll(".nav-tab[data-type]"),
@@ -65,6 +91,7 @@
     heroTitle: document.getElementById("hero-title"),
     heroDescription: document.getElementById("hero-description"),
     heroPlayBtn: document.getElementById("hero-play-btn"),
+    heroFavoriteBtn: document.getElementById("hero-favorite-btn"),
     heroInfoBtn: document.getElementById("hero-info-btn"),
     sectionTitle: document.getElementById("section-title"),
     sectionCount: document.getElementById("section-count"),
@@ -93,6 +120,7 @@
     deviceSelect: document.getElementById("device-select"),
     btnPlayTrigger: document.getElementById("btn-play-trigger"),
     btnPlayText: document.getElementById("btn-play-text"),
+    btnFavoriteTrigger: document.getElementById("btn-favorite-trigger"),
     playerModal: document.getElementById("player-modal"),
     playerCloseBtn: document.getElementById("player-close-btn"),
     playerFullscreenBtn: document.getElementById("player-fullscreen-btn"),
@@ -137,10 +165,11 @@
   async function init() {
     setupEventListeners();
     await checkStatus();
+    await loadProfiles();
     loadPlayers();
     loadGenres();
     await loadSources();
-    loadContinueWatching();
+    refreshAllShelves();
     loadCatalog();
     checkActiveCastSession();
   }
@@ -231,6 +260,24 @@
     // Play Button Trigger
     elements.btnPlayTrigger.addEventListener("click", handlePlayAction);
 
+    // Favorite Modal Trigger
+    if (elements.btnFavoriteTrigger) {
+      elements.btnFavoriteTrigger.addEventListener("click", () => {
+        if (state.selectedItem) {
+          toggleFavoriteItem(state.selectedItem);
+        }
+      });
+    }
+
+    // Hero Favorite Button
+    if (elements.heroFavoriteBtn) {
+      elements.heroFavoriteBtn.addEventListener("click", () => {
+        if (state.catalogItems && state.catalogItems.length > 0) {
+          toggleFavoriteItem(state.catalogItems[0]);
+        }
+      });
+    }
+
     // Restart Button Trigger (from 0:00)
     if (elements.btnRestartTrigger) {
       elements.btnRestartTrigger.addEventListener("click", () => {
@@ -246,6 +293,47 @@
       state.selectedDevice = e.target.value;
       updatePlayButtonText();
     });
+
+    // Profile Dropdown Toggle
+    if (elements.btnProfilePill && elements.profileDropdownWrapper) {
+      elements.btnProfilePill.addEventListener("click", (e) => {
+        e.stopPropagation();
+        elements.profileDropdownWrapper.classList.toggle("open");
+        elements.profileDropdownMenu.classList.toggle("hidden");
+      });
+
+      document.addEventListener("click", (e) => {
+        if (!elements.profileDropdownWrapper.contains(e.target)) {
+          elements.profileDropdownWrapper.classList.remove("open");
+          elements.profileDropdownMenu.classList.add("hidden");
+        }
+      });
+    }
+
+    // Dropdown Actions
+    if (elements.btnDropdownSwitch) {
+      elements.btnDropdownSwitch.addEventListener("click", () => {
+        elements.profileDropdownWrapper.classList.remove("open");
+        elements.profileDropdownMenu.classList.add("hidden");
+        openProfilePickerModal();
+      });
+    }
+
+    if (elements.btnDropdownFavorites) {
+      elements.btnDropdownFavorites.addEventListener("click", () => {
+        elements.profileDropdownWrapper.classList.remove("open");
+        elements.profileDropdownMenu.classList.add("hidden");
+        switchToTab("favorites");
+      });
+    }
+
+    if (elements.btnDropdownWatched) {
+      elements.btnDropdownWatched.addEventListener("click", () => {
+        elements.profileDropdownWrapper.classList.remove("open");
+        elements.profileDropdownMenu.classList.add("hidden");
+        switchToTab("watched");
+      });
+    }
 
     // Cast Control Bar Listeners
     if (elements.castBarPlayPause) {
@@ -274,13 +362,173 @@
     // Keyboard Esc
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
-        if (elements.playerModal && !elements.playerModal.classList.contains("hidden")) {
+        if (elements.profilePickerModal && !elements.profilePickerModal.classList.contains("hidden")) {
+          // If a profile is already selected, allow closing picker
+          if (state.activeProfileId) {
+            elements.profilePickerModal.classList.add("hidden");
+          }
+        } else if (elements.playerModal && !elements.playerModal.classList.contains("hidden")) {
           closePlayer();
         } else if (elements.detailsModal && !elements.detailsModal.classList.contains("hidden")) {
           closeModal();
         }
       }
     });
+  }
+
+  // Switch active tab programmatically
+  function switchToTab(type) {
+    elements.navTabs.forEach((t) => {
+      t.classList.toggle("active", t.dataset.type === type);
+    });
+    state.activeType = type;
+    state.activeGenre = null;
+    updateGenreChipsUI();
+    loadCatalog();
+  }
+
+  // Profile Management
+  function getAvatarClass(avatarIndex) {
+    const idx = ((parseInt(avatarIndex, 10) || 1) - 1) % 6 + 1;
+    return `avatar-bg-${idx}`;
+  }
+
+  async function loadProfiles() {
+    try {
+      const resp = await fetch(apiUrl("api/profiles"));
+      if (resp.ok) {
+        state.profiles = await resp.json();
+      }
+    } catch (err) {
+      console.warn("Could not load profiles:", err);
+      state.profiles = [
+        { id: "default", name: "Principale", avatar: 1, rating_filter: "ALL" }
+      ];
+    }
+
+    if (!state.profiles || state.profiles.length === 0) {
+      state.profiles = [
+        { id: "default", name: "Principale", avatar: 1, rating_filter: "ALL" }
+      ];
+    }
+
+    // Check if active profile exists
+    const storedId = localStorage.getItem("streaming_hub_active_profile_id");
+    const active = state.profiles.find((p) => p.id === storedId) || state.profiles[0];
+    state.activeProfileId = active.id;
+    localStorage.setItem("streaming_hub_active_profile_id", active.id);
+
+    renderActiveProfileHeader();
+    renderProfileDropdown();
+
+    // If first time visit or multiple profiles and user hasn't chosen in this browser session
+    const hasChosenThisSession = sessionStorage.getItem("streaming_hub_profile_selected");
+    if (!hasChosenThisSession && state.profiles.length > 1) {
+      openProfilePickerModal();
+    }
+  }
+
+  function getActiveProfile() {
+    return state.profiles.find((p) => p.id === state.activeProfileId) || state.profiles[0] || {
+      id: "default",
+      name: "Principale",
+      avatar: 1,
+      rating_filter: "ALL"
+    };
+  }
+
+  function renderActiveProfileHeader() {
+    const profile = getActiveProfile();
+    if (elements.navProfileAvatar) {
+      elements.navProfileAvatar.className = `profile-avatar-thumb ${getAvatarClass(profile.avatar)}`;
+      elements.navProfileAvatar.textContent = (profile.name || "P").charAt(0).toUpperCase();
+    }
+    if (elements.navProfileName) {
+      elements.navProfileName.textContent = profile.name;
+    }
+  }
+
+  function renderProfileDropdown() {
+    if (!elements.profilesListMenu) return;
+    elements.profilesListMenu.innerHTML = "";
+
+    state.profiles.forEach((p) => {
+      const isCurrent = p.id === state.activeProfileId;
+      const row = document.createElement("div");
+      row.className = `profile-item-row ${isCurrent ? "active" : ""}`;
+
+      const avatarClass = getAvatarClass(p.avatar);
+      const ratingBadge = p.rating_filter && p.rating_filter !== "ALL" ? ` (${p.rating_filter})` : "";
+
+      row.innerHTML = `
+        <div class="profile-item-left">
+          <div class="profile-avatar-thumb ${avatarClass}">${(p.name || "P").charAt(0).toUpperCase()}</div>
+          <div class="profile-name-col">
+            <span class="profile-item-name">${escapeHtml(p.name)}</span>
+            <span class="profile-rating-badge">${p.rating_filter || "Tutti"}${ratingBadge ? "" : " (Tutti i contenuti)"}</span>
+          </div>
+        </div>
+        ${isCurrent ? '<svg style="width:16px;height:16px;color:var(--primary)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>' : ""}
+      `;
+
+      row.addEventListener("click", () => {
+        elements.profileDropdownWrapper.classList.remove("open");
+        elements.profileDropdownMenu.classList.add("hidden");
+        selectProfile(p.id);
+      });
+
+      elements.profilesListMenu.appendChild(row);
+    });
+  }
+
+  function openProfilePickerModal() {
+    if (!elements.profilePickerModal || !elements.profilePickerGrid) return;
+    elements.profilePickerGrid.innerHTML = "";
+
+    state.profiles.forEach((p) => {
+      const card = document.createElement("div");
+      const isCurrent = p.id === state.activeProfileId;
+      card.className = `profile-picker-card ${isCurrent ? "active" : ""}`;
+
+      const avatarClass = getAvatarClass(p.avatar);
+      card.innerHTML = `
+        <div class="profile-picker-avatar ${avatarClass}">
+          ${(p.name || "P").charAt(0).toUpperCase()}
+        </div>
+        <span class="profile-picker-name">${escapeHtml(p.name)}</span>
+        <span class="profile-picker-tag">${p.rating_filter || "ALL"}</span>
+      `;
+
+      card.addEventListener("click", () => {
+        selectProfile(p.id);
+        elements.profilePickerModal.classList.add("hidden");
+      });
+
+      elements.profilePickerGrid.appendChild(card);
+    });
+
+    elements.profilePickerModal.classList.remove("hidden");
+  }
+
+  async function selectProfile(profileId) {
+    if (state.activeProfileId === profileId) {
+      sessionStorage.setItem("streaming_hub_profile_selected", "1");
+      return;
+    }
+
+    state.activeProfileId = profileId;
+    localStorage.setItem("streaming_hub_active_profile_id", profileId);
+    sessionStorage.setItem("streaming_hub_profile_selected", "1");
+
+    renderActiveProfileHeader();
+    renderProfileDropdown();
+
+    const current = getActiveProfile();
+    showToast(`Benvenuto, ${current.name}!`, "info");
+
+    // Refresh all profile-scoped data
+    refreshAllShelves();
+    loadCatalog();
   }
 
   // Load Media Players from Home Assistant
@@ -444,6 +692,63 @@
     showLoading(true);
     elements.emptyState.classList.add("hidden");
 
+    // Manage Carousel Shelves visibility: show carousels on "all", hide on specific tabs or search
+    const isHome = state.activeType === "all" && !state.activeGenre && !state.searchQuery;
+    if (!isHome) {
+      if (elements.continueSection) elements.continueSection.classList.add("hidden");
+      if (elements.favoritesSection) elements.favoritesSection.classList.add("hidden");
+      if (elements.watchedSection) elements.watchedSection.classList.add("hidden");
+    } else {
+      refreshAllShelves();
+    }
+
+    // Tab "favorites"
+    if (state.activeType === "favorites") {
+      elements.sectionTitle.textContent = "I Tuoi Preferiti";
+      elements.heroSection.classList.add("hidden");
+      try {
+        const resp = await fetch(apiUrl(`api/favorites?profile_id=${encodeURIComponent(state.activeProfileId)}`));
+        if (!resp.ok) throw new Error("Favorites fetch failed");
+        const favs = await resp.json();
+        state.catalogItems = favs || [];
+        renderGrid(state.catalogItems);
+      } catch (err) {
+        console.error("Error loading favorites tab:", err);
+        showToast("Errore nel caricamento dei preferiti", "error");
+      } finally {
+        showLoading(false);
+      }
+      return;
+    }
+
+    // Tab "watched"
+    if (state.activeType === "watched") {
+      elements.sectionTitle.textContent = "Titoli Già Visti";
+      elements.heroSection.classList.add("hidden");
+      try {
+        const resp = await fetch(apiUrl(`api/history/watched?profile_id=${encodeURIComponent(state.activeProfileId)}&limit=50`));
+        if (!resp.ok) throw new Error("Watched fetch failed");
+        const watched = await resp.json();
+        // Normalize watched items to match catalog item structure
+        state.catalogItems = (watched || []).map((w) => ({
+          id: w.media_id,
+          title: w.title,
+          type: w.media_type,
+          poster_url: w.poster_url,
+          year: w.completed_at ? new Date(w.completed_at).getFullYear() : "",
+          rating: "",
+          genres: ["Visto"],
+        }));
+        renderGrid(state.catalogItems);
+      } catch (err) {
+        console.error("Error loading watched tab:", err);
+        showToast("Errore nel caricamento della cronologia visti", "error");
+      } finally {
+        showLoading(false);
+      }
+      return;
+    }
+
     if (!state.availableSources || state.availableSources.length === 0) {
       showLoading(false);
       elements.heroSection.classList.add("hidden");
@@ -462,13 +767,17 @@
     elements.sectionTitle.textContent = titleText;
 
     try {
-      const url = apiUrl(`api/catalog/latest?type=${state.activeType}&source=${state.activeSource}&page=1`);
+      const url = apiUrl(`api/catalog/latest?type=${state.activeType}&source=${state.activeSource}&page=1&profile_id=${encodeURIComponent(state.activeProfileId)}`);
       const resp = await fetch(url);
       if (!resp.ok) throw new Error("Network response was not ok");
       const data = await resp.json();
       state.catalogItems = data.results || [];
       renderGrid(state.catalogItems);
-      updateHero(state.catalogItems[0]);
+      if (isHome && state.catalogItems.length > 0) {
+        updateHero(state.catalogItems[0]);
+      } else {
+        elements.heroSection.classList.add("hidden");
+      }
     } catch (err) {
       console.error("Error loading catalog:", err);
       showToast("Errore nel caricamento del catalogo", "error");
@@ -482,10 +791,14 @@
     showLoading(true);
     elements.emptyState.classList.add("hidden");
     elements.heroSection.classList.add("hidden");
+    if (elements.continueSection) elements.continueSection.classList.add("hidden");
+    if (elements.favoritesSection) elements.favoritesSection.classList.add("hidden");
+    if (elements.watchedSection) elements.watchedSection.classList.add("hidden");
+
     elements.sectionTitle.textContent = `Risultati per "${query}"`;
 
     try {
-      const url = apiUrl(`api/catalog/search?q=${encodeURIComponent(query)}&type=${state.activeType}&source=${state.activeSource}`);
+      const url = apiUrl(`api/catalog/search?q=${encodeURIComponent(query)}&type=${state.activeType}&source=${state.activeSource}&profile_id=${encodeURIComponent(state.activeProfileId)}`);
       const resp = await fetch(url);
       if (!resp.ok) throw new Error("Search failed");
       const data = await resp.json();
@@ -504,11 +817,15 @@
     showLoading(true);
     elements.emptyState.classList.add("hidden");
     elements.heroSection.classList.add("hidden");
+    if (elements.continueSection) elements.continueSection.classList.add("hidden");
+    if (elements.favoritesSection) elements.favoritesSection.classList.add("hidden");
+    if (elements.watchedSection) elements.watchedSection.classList.add("hidden");
+
     elements.sectionTitle.textContent = `Genere: ${genre}`;
 
     try {
       const type = state.activeType === "tv" ? "tv" : "movie";
-      const url = apiUrl(`api/catalog/genre/${encodeURIComponent(genre)}?type=${type}&source=${state.activeSource}`);
+      const url = apiUrl(`api/catalog/genre/${encodeURIComponent(genre)}?type=${type}&source=${state.activeSource}&profile_id=${encodeURIComponent(state.activeProfileId)}`);
       const resp = await fetch(url);
       if (!resp.ok) throw new Error("Genre fetch failed");
       const data = await resp.json();
@@ -644,10 +961,196 @@
     return `${remM}:${pad(remS)}`;
   }
 
+  // All Shelves Refresh
+  function refreshAllShelves() {
+    loadContinueWatching();
+    loadFavoritesShelf();
+    loadWatchedShelf();
+  }
+
+  // Favorites Shelf & Management
+  async function loadFavoritesShelf() {
+    if (!elements.favoritesSection || !elements.favoritesRow) return;
+    try {
+      const resp = await fetch(apiUrl(`api/favorites?profile_id=${encodeURIComponent(state.activeProfileId)}`));
+      if (!resp.ok) return;
+      const items = await resp.json();
+      state.favoritesSet = new Set((items || []).map((i) => i.id));
+      renderFavoritesShelf(items || []);
+    } catch (err) {
+      console.warn("Could not load favorites shelf:", err);
+    }
+  }
+
+  function renderFavoritesShelf(items) {
+    if (!elements.favoritesSection || !elements.favoritesRow) return;
+    elements.favoritesRow.innerHTML = "";
+
+    if (!items || items.length === 0) {
+      elements.favoritesSection.classList.add("hidden");
+      return;
+    }
+
+    // Only show on home tab ("all") when not searching
+    if (state.activeType === "all" && !state.searchQuery && !state.activeGenre) {
+      elements.favoritesSection.classList.remove("hidden");
+    }
+
+    if (elements.favoritesCount) {
+      elements.favoritesCount.textContent = `${items.length} preferiti`;
+    }
+
+    items.forEach((item) => {
+      const card = document.createElement("div");
+      card.className = "media-card";
+
+      const posterSrc = item.poster_url || "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='450' viewBox='0 0 300 450'%3E%3Crect width='300' height='450' fill='%23182030'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%2364748b' font-family='sans-serif' font-size='18'%3ELocandina%3C/text%3E%3C/svg%3E";
+      const isTv = item.type === "tv" || !!item.seasons;
+      const typeLabel = isTv ? "Serie TV" : "Film";
+
+      card.innerHTML = `
+        <div class="card-poster-wrap">
+          <img class="card-poster" src="${posterSrc}" alt="${escapeHtml(item.title)}" loading="lazy">
+          <div class="card-badges">
+            <span class="card-badge-type">${typeLabel}</span>
+          </div>
+        </div>
+        <div class="card-info">
+          <div class="card-title" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</div>
+        </div>
+      `;
+
+      card.addEventListener("click", () => openDetails(item));
+      elements.favoritesRow.appendChild(card);
+    });
+  }
+
+  // Watched Shelf
+  async function loadWatchedShelf() {
+    if (!elements.watchedSection || !elements.watchedRow) return;
+    try {
+      const resp = await fetch(apiUrl(`api/history/watched?profile_id=${encodeURIComponent(state.activeProfileId)}&limit=15`));
+      if (!resp.ok) return;
+      const items = await resp.json();
+      renderWatchedShelf(items || []);
+    } catch (err) {
+      console.warn("Could not load watched shelf:", err);
+    }
+  }
+
+  function renderWatchedShelf(items) {
+    if (!elements.watchedSection || !elements.watchedRow) return;
+    elements.watchedRow.innerHTML = "";
+
+    if (!items || items.length === 0) {
+      elements.watchedSection.classList.add("hidden");
+      return;
+    }
+
+    if (state.activeType === "all" && !state.searchQuery && !state.activeGenre) {
+      elements.watchedSection.classList.remove("hidden");
+    }
+
+    if (elements.watchedCount) {
+      elements.watchedCount.textContent = `${items.length} completati`;
+    }
+
+    items.forEach((item) => {
+      const card = document.createElement("div");
+      card.className = "media-card";
+
+      const posterSrc = item.poster_url || "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='450' viewBox='0 0 300 450'%3E%3Crect width='300' height='450' fill='%23182030'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%2364748b' font-family='sans-serif' font-size='18'%3ELocandina%3C/text%3E%3C/svg%3E";
+      const isTv = item.media_type === "tv";
+      const typeLabel = isTv ? "Serie TV" : "Film";
+
+      card.innerHTML = `
+        <div class="card-poster-wrap">
+          <img class="card-poster" src="${posterSrc}" alt="${escapeHtml(item.title)}" loading="lazy">
+          <div class="card-badges">
+            <span class="card-badge-type">${typeLabel}</span>
+            <span class="card-badge-rating">✓ Visto</span>
+          </div>
+        </div>
+        <div class="card-info">
+          <div class="card-title" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</div>
+        </div>
+      `;
+
+      card.addEventListener("click", () => {
+        openDetails({
+          id: item.media_id,
+          title: item.title,
+          type: item.media_type,
+          poster_url: item.poster_url,
+        });
+      });
+      elements.watchedRow.appendChild(card);
+    });
+  }
+
+  // Toggle Favorite
+  async function toggleFavoriteItem(item) {
+    if (!item || !item.id) return;
+    const isTv = item.type === "tv" || !!item.seasons;
+
+    try {
+      const payload = {
+        title_id: item.id,
+        media_type: isTv ? "tv" : "movie",
+        title: item.title,
+        poster_url: item.poster_url || "",
+        tmdb_id: item.tmdb_id || null,
+        imdb_id: item.imdb_id || null,
+        profile_id: state.activeProfileId,
+      };
+
+      const resp = await fetch(apiUrl("api/favorites/toggle"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!resp.ok) throw new Error("Toggle favorite failed");
+      const data = await resp.json();
+      const isFav = !!data.favorite;
+
+      if (isFav) {
+        state.favoritesSet.add(item.id);
+        showToast(`"${item.title}" aggiunto ai Preferiti! ❤️`, "success");
+      } else {
+        state.favoritesSet.delete(item.id);
+        showToast(`"${item.title}" rimosso dai Preferiti`, "info");
+      }
+
+      // Update button visual states
+      updateFavoriteButtonUI(isFav);
+      loadFavoritesShelf();
+
+      // If on favorites tab, refresh the grid
+      if (state.activeType === "favorites") {
+        loadCatalog();
+      }
+    } catch (err) {
+      console.error("Toggle favorite error:", err);
+      showToast("Impossibile aggiornare i preferiti", "error");
+    }
+  }
+
+  function updateFavoriteButtonUI(isFavorite) {
+    if (elements.btnFavoriteTrigger) {
+      elements.btnFavoriteTrigger.classList.toggle("active", isFavorite);
+      elements.btnFavoriteTrigger.title = isFavorite ? "Rimuovi dai Preferiti" : "Aggiungi ai Preferiti";
+    }
+    if (elements.heroFavoriteBtn) {
+      elements.heroFavoriteBtn.classList.toggle("active", isFavorite);
+      elements.heroFavoriteBtn.title = isFavorite ? "Rimuovi dai Preferiti" : "Aggiungi ai Preferiti";
+    }
+  }
+
   // Continue Watching Section
   async function loadContinueWatching() {
     try {
-      const resp = await fetch(apiUrl("api/history/continue"));
+      const resp = await fetch(apiUrl(`api/history/continue?profile_id=${encodeURIComponent(state.activeProfileId)}`));
       if (!resp.ok) return;
       const items = await resp.json();
       renderContinueWatching(items);
@@ -665,7 +1168,10 @@
       return;
     }
 
-    elements.continueSection.classList.remove("hidden");
+    if (state.activeType === "all" && !state.searchQuery && !state.activeGenre) {
+      elements.continueSection.classList.remove("hidden");
+    }
+
     if (elements.continueCount) {
       elements.continueCount.textContent = `${items.length} in corso`;
     }
@@ -727,7 +1233,7 @@
         card.style.opacity = "0.3";
         card.style.transform = "scale(0.95)";
         try {
-          await fetch(apiUrl(`api/history/${encodeURIComponent(item.media_id)}`), { method: "DELETE" });
+          await fetch(apiUrl(`api/history/${encodeURIComponent(item.media_id)}?profile_id=${encodeURIComponent(state.activeProfileId)}`), { method: "DELETE" });
           loadContinueWatching();
           showToast(`"${item.title}" rimosso da Continua a guardare`, "info");
         } catch (err) {
@@ -774,6 +1280,10 @@
     const backdrop = item.backdrop_url || poster;
     elements.modalBackdropImg.style.backgroundImage = backdrop ? `url("${backdrop}")` : "";
 
+    // Set initial favorite UI from cached Set
+    const isFav = state.favoritesSet.has(item.id) || !!item.is_favorite;
+    updateFavoriteButtonUI(isFav);
+
     elements.modalGenres.innerHTML = "";
     if (item.genres) {
       item.genres.forEach((g) => {
@@ -790,8 +1300,8 @@
     // Fetch full enriched details and watch progress concurrently
     try {
       const [detailsResp, progResp] = await Promise.all([
-        fetch(apiUrl(`api/catalog/title/${mediaType}/${item.id}`)),
-        fetch(apiUrl(`api/history/progress/${item.id}`)),
+        fetch(apiUrl(`api/catalog/title/${mediaType}/${item.id}?profile_id=${encodeURIComponent(state.activeProfileId)}`)),
+        fetch(apiUrl(`api/history/progress/${item.id}?profile_id=${encodeURIComponent(state.activeProfileId)}`)),
       ]);
 
       if (progResp.ok) {
@@ -807,6 +1317,11 @@
       if (detailsResp.ok) {
         const detailed = await detailsResp.json();
         state.selectedItem = detailed;
+        if (detailed.is_favorite !== undefined) {
+          if (detailed.is_favorite) state.favoritesSet.add(item.id);
+          else state.favoritesSet.delete(item.id);
+          updateFavoriteButtonUI(detailed.is_favorite);
+        }
         updateModalWithDetails(detailed, targetEpisode || (state.resumeProgress && state.resumeProgress.episode_number));
       } else {
         updateModalWithDetails(item, targetEpisode);
@@ -1096,6 +1611,7 @@
         season_number: seasonNum,
         episode_number: epNum,
         seek_seconds: resumeSec,
+        profile_id: state.activeProfileId,
       };
 
       const resp = await fetch(apiUrl("api/cast"), {
@@ -1225,6 +1741,7 @@
       episode_number: (isTv && state.selectedEpisode) ? state.selectedEpisode.episode_number : null,
       progress_seconds: video.currentTime,
       duration_seconds: video.duration || 0,
+      profile_id: state.activeProfileId,
     };
     fetch(apiUrl("api/history"), {
       method: "POST",
@@ -1650,7 +2167,7 @@
     // Refresh core states
     checkStatus();
     loadPlayers();
-    loadContinueWatching();
+    refreshAllShelves();
 
     // Check or resume active cast polling
     if (state.castSession && state.castSession.active && state.castSession.entityId) {

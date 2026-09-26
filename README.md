@@ -60,8 +60,32 @@ stream_port: 8099
 | `log_level` | list | `info` | Livello di log dell'app (`trace`, `debug`, `info`, `warning`, `error`). |
 | `custom_sources` | list | `[]` | Array di sorgenti web dell'utente. Il tipo può essere `auto`, `streamingcommunity` o `cb01`. |
 | `custom_dns` | list | `cloudflare` | Provider DNS-over-HTTPS (`cloudflare`, `google`, `quad9`, `system`). |
-| `tmdb_api_key` | string | `""` | *(Opzionale)* Chiave API TMDb per locandine HD e trame arricchite. |
+| `tmdb_api_key` | string | `""` | *(Opzionale)* Chiave API TMDb globale di fallback. |
 | `stream_port` | port | `8099` | Porta proxy HTTP per lo streaming nella rete locale (LAN). |
+| `profiles` | list | `[...]` | Profili del Family Account con filtro età (`ALL`, `18+`, `14+`, `6+`, `T`), chiavi TMDb e credenziali Trakt.tv individuali. |
+
+### Family Account & Profili Famiglia
+
+Streaming Hub supporta profili multipli con preferenze separate:
+- **Filtro Classificazione per Età**: limita i titoli visibili in base alla classificazione (`ALL`, `18+`, `14+`, `6+`, `T`).
+- **Liste Separate per Profilo**: *Continua a guardare*, *I Tuoi Preferiti* e *Titoli Già Visti*.
+- **Integrazione TMDb e Trakt.tv per Persona**: ogni profilo può inserire la propria chiave TMDb e le proprie credenziali Trakt.tv per scrobblare la riproduzione in tempo reale.
+- **Selettore Netflix-Style**: cambio rapido profilo tramite pillola nell'header o modale *"Chi sta guardando?"*.
+
+```yaml
+profiles:
+  - id: "papà"
+    name: "Papà"
+    avatar: 1
+    rating_filter: "ALL"
+    tmdb_api_key: "tmdb_key_1"
+    trakt_client_id: "trakt_client_id_1"
+    trakt_access_token: "trakt_token_1"
+  - id: "bimbi"
+    name: "Bimbi"
+    avatar: 4
+    rating_filter: "6+"
+```
 
 ---
 
