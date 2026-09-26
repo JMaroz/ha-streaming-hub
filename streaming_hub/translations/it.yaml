@@ -5,7 +5,9 @@ configuration:
     description: "Controlla il livello di dettaglio dei log dell'applicazione."
   custom_sources:
     name: "Sorgenti di Streaming Personalizzate"
-    description: "Elenco degli indirizzi web (URL) delle tue sorgenti. Il tipo (StreamingCommunity o CB01) può essere impostato su auto per essere rilevato automaticamente."
+    description: >-
+      Elenco degli indirizzi web (URL) delle tue sorgenti. Il tipo (StreamingCommunity o CB01)
+      può essere impostato su auto per essere rilevato automaticamente.
   custom_dns:
     name: "Modalità DNS-over-HTTPS"
     description: "Metodo di risoluzione DNS per superare blocchi ISP locali (Cloudflare, Google, Quad9 o sistema)."
@@ -17,4 +19,6 @@ configuration:
     description: "Porta HTTP utilizzata per servire i flussi video HLS ai dispositivi nella rete locale."
   profiles:
     name: "Profili Family Account"
-    description: "Elenco delle persone/profili della famiglia. Ciascun profilo ha le proprie liste (Iniziati, Visti, Preferiti), filtro di classificazione per età, e credenziali personali TMDb e Trakt.tv."
+    description: >-
+      Elenco delle persone/profili della famiglia. Ciascun profilo ha le proprie liste (Iniziati,
+      Visti, Preferiti), filtro di classificazione per età, e credenziali personali TMDb e Trakt.tv.

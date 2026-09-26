@@ -5,7 +5,9 @@ configuration:
     description: "Controls the verbosity of the add-on logs."
   custom_sources:
     name: "Custom Streaming Sources"
-    description: "List of base website URLs for your sources. Type (StreamingCommunity or CB01) can be set to auto for automatic fingerprinting."
+    description: >-
+      List of base website URLs for your sources. Type (StreamingCommunity or CB01)
+      can be set to auto for automatic fingerprinting.
   custom_dns:
     name: "DNS-over-HTTPS Mode"
     description: "DNS resolution method to bypass local ISP censorship (Cloudflare, Google, Quad9, or system)."
@@ -17,4 +19,6 @@ configuration:
     description: "HTTP port used to serve proxied HLS video streams on the local network."
   profiles:
     name: "Family Account Profiles"
-    description: "List of family members/profiles. Each profile has individual lists (In Progress, Watched, Favorites), age rating filter, and personal TMDb / Trakt.tv credentials."
+    description: >-
+      List of family members/profiles. Each profile has individual lists (In Progress, Watched, Favorites),
+      age rating filter, and personal TMDb / Trakt.tv credentials.

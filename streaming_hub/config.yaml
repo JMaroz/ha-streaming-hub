@@ -45,4 +45,3 @@ schema:
       trakt_client_id: "str?"
       trakt_access_token: "str?"
       pin: "str?"
-

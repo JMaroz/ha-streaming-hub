@@ -506,7 +506,7 @@ async def trakt_scrobble(req: TraktScrobbleRequest) -> dict[str, Any]:
 
 @app.get("/api/catalog/latest")
 async def get_latest(
-    type: str = Query("all", regex="^(all|movie|tv)$"),
+    type: str = Query("all", pattern="^(all|movie|tv)$"),
     source: str = Query("all"),
     page: int = Query(1, ge=1),
     profile_id: str = Query("default"),
@@ -522,7 +522,7 @@ async def get_latest(
 @app.get("/api/catalog/search")
 async def search_catalog(
     q: str = Query(..., min_length=1),
-    type: str = Query("all", regex="^(all|movie|tv)$"),
+    type: str = Query("all", pattern="^(all|movie|tv)$"),
     source: str = Query("all"),
     profile_id: str = Query("default"),
 ) -> dict[str, Any]:
@@ -544,7 +544,7 @@ async def get_genres() -> list[str]:
 @app.get("/api/catalog/genre/{genre}")
 async def get_by_genre(
     genre: str,
-    type: str = Query("movie", regex="^(movie|tv)$"),
+    type: str = Query("movie", pattern="^(movie|tv)$"),
     source: str = Query("all"),
     page: int = Query(1, ge=1),
     profile_id: str = Query("default"),

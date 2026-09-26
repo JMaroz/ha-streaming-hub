@@ -56,6 +56,7 @@ class MediaDatabase:
         """Synchronously create tables and perform migrations."""
         _LOGGER.info("Initializing persistent SQLite database at %s", self._db_path)
         with self._get_connection() as conn:
+            # 1. Base Tables Creation (if not exists)
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS titles (
                     id TEXT PRIMARY KEY,
@@ -83,10 +84,6 @@ class MediaDatabase:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 
-                CREATE INDEX IF NOT EXISTS idx_titles_type ON titles(media_type);
-                CREATE INDEX IF NOT EXISTS idx_titles_title ON titles(title);
-                CREATE INDEX IF NOT EXISTS idx_titles_updated ON titles(updated_at);
-
                 CREATE TABLE IF NOT EXISTS seasons (
                     id TEXT PRIMARY KEY,
                     series_id TEXT NOT NULL,
@@ -94,8 +91,6 @@ class MediaDatabase:
                     episodes_json TEXT NOT NULL,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
-
-                CREATE INDEX IF NOT EXISTS idx_seasons_series ON seasons(series_id, season_number);
 
                 CREATE TABLE IF NOT EXISTS watch_history (
                     id TEXT PRIMARY KEY,
@@ -111,8 +106,6 @@ class MediaDatabase:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 
-                CREATE INDEX IF NOT EXISTS idx_history_updated ON watch_history(profile_id, updated_at DESC);
-
                 CREATE TABLE IF NOT EXISTS favorites (
                     id TEXT PRIMARY KEY,
                     profile_id TEXT NOT NULL DEFAULT 'default',
@@ -122,11 +115,9 @@ class MediaDatabase:
                     poster_url TEXT,
                     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
-
-                CREATE INDEX IF NOT EXISTS idx_favorites_profile ON favorites(profile_id, added_at DESC);
             """)
 
-            # Safe SQLite Schema Migrations for existing user databases
+            # 2. Safe SQLite Schema Migrations for existing user databases
             try:
                 conn.execute("ALTER TABLE titles ADD COLUMN certification TEXT;")
             except Exception:
@@ -147,11 +138,20 @@ class MediaDatabase:
             except Exception:
                 pass
 
-            try:
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_history_profile_media ON watch_history(profile_id, media_id);")
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_favorites_profile_title ON favorites(profile_id, title_id);")
-            except Exception:
-                pass
+            # 3. Create Indexes (guaranteed that all columns exist)
+            conn.executescript("""
+                CREATE INDEX IF NOT EXISTS idx_titles_type ON titles(media_type);
+                CREATE INDEX IF NOT EXISTS idx_titles_title ON titles(title);
+                CREATE INDEX IF NOT EXISTS idx_titles_updated ON titles(updated_at);
+
+                CREATE INDEX IF NOT EXISTS idx_seasons_series ON seasons(series_id, season_number);
+
+                CREATE INDEX IF NOT EXISTS idx_history_updated ON watch_history(profile_id, updated_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_history_profile_media ON watch_history(profile_id, media_id);
+
+                CREATE INDEX IF NOT EXISTS idx_favorites_profile ON favorites(profile_id, added_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_favorites_profile_title ON favorites(profile_id, title_id);
+            """)
 
 
     async def save_title(self, item: Movie | TvSeries) -> None:
