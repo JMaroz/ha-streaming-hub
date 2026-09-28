@@ -268,30 +268,32 @@ class StreamProxy:
                     media_type=content_type,
                 )
 
-            # Check if upstream returned a text playlist despite URL not matching
-            if content_type.startswith("text/") or "mpegurl" in content_type:
-                raw_text = await upstream_resp.text()
-                upstream_resp.close()
-                if "#EXTM3U" in raw_text:
-                    rewritten = self.rewrite_m3u8(raw_text, str(upstream_resp.url), token, root_path=root_path)
-                    return Response(
-                        content=rewritten,
-                        media_type="application/vnd.apple.mpegurl",
-                        headers={
-                            "Cache-Control": "no-cache, no-store, must-revalidate",
-                            "Access-Control-Allow-Origin": "*",
-                        },
-                    )
+            raw_bytes = await upstream_resp.read()
+            upstream_resp.close()
 
-            async def iterfile() -> AsyncGenerator[bytes, None]:
-                try:
-                    async for chunk in upstream_resp.content.iter_chunked(65536):
-                        yield chunk
-                finally:
-                    upstream_resp.close()
+            # Check if upstream returned a text M3U8 playlist
+            if b"#EXTM3U" in raw_bytes[:512]:
+                raw_text = raw_bytes.decode("utf-8", errors="replace")
+                rewritten = self.rewrite_m3u8(raw_text, str(upstream_resp.url), token, root_path=root_path)
+                return Response(
+                    content=rewritten,
+                    media_type="application/vnd.apple.mpegurl",
+                    headers={
+                        "Cache-Control": "no-cache, no-store, must-revalidate",
+                        "Access-Control-Allow-Origin": "*",
+                    },
+                )
 
-            return StreamingResponse(
-                iterfile(),
+            # Correct content-type if CDN incorrectly served binary segment with text/html or text/plain
+            if content_type.startswith("text/"):
+                if raw_bytes.startswith(b"\x00\x00\x00") or b"ftyp" in raw_bytes[:32]:
+                    content_type = "video/mp4"
+                else:
+                    content_type = "video/MP2T"
+                out_headers["Content-Type"] = content_type
+
+            return Response(
+                content=raw_bytes,
                 status_code=status_code,
                 headers=out_headers,
                 media_type=content_type,

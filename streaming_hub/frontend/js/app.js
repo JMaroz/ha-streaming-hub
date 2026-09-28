@@ -1297,13 +1297,17 @@
 
   // Open Details Modal
   async function openDetails(item, targetSeason = null, targetEpisode = null) {
-    state.selectedItem = item;
+    const itemId = item ? (item.id || item.title_id) : null;
+    const itemType = item ? (item.type || item.media_type) : null;
+    const normalizedItem = item ? { ...item, id: itemId, type: itemType } : null;
+
+    state.selectedItem = normalizedItem;
     state.selectedSeason = targetSeason || 1;
     state.selectedEpisode = null;
     state.selectedSource = null;
     state.resumeProgress = null;
 
-    const mediaType = item.type === "tv" || !!item.seasons ? "tv" : "movie";
+    const mediaType = itemType === "tv" || !!(item && item.seasons) ? "tv" : "movie";
 
     // Show initial data
     elements.modalTitle.textContent = item.title;
@@ -1319,7 +1323,7 @@
     elements.modalBackdropImg.style.backgroundImage = backdrop ? `url("${backdrop}")` : "";
 
     // Set initial favorite UI from cached Set
-    const isFav = state.favoritesSet.has(item.id) || !!item.is_favorite;
+    const isFav = state.favoritesSet.has(itemId) || !!(item && item.is_favorite);
     updateFavoriteButtonUI(isFav);
 
     elements.modalGenres.innerHTML = "";
@@ -1338,8 +1342,8 @@
     // Fetch full enriched details and watch progress concurrently
     try {
       const [detailsResp, progResp] = await Promise.all([
-        fetch(apiUrl(`api/catalog/title/${mediaType}/${item.id}?profile_id=${encodeURIComponent(state.activeProfileId)}`)),
-        fetch(apiUrl(`api/history/progress/${item.id}?profile_id=${encodeURIComponent(state.activeProfileId)}`)),
+        fetch(apiUrl(`api/catalog/title/${mediaType}/${itemId}?profile_id=${encodeURIComponent(state.activeProfileId)}`)),
+        fetch(apiUrl(`api/history/progress/${itemId}?profile_id=${encodeURIComponent(state.activeProfileId)}`)),
       ]);
 
       if (progResp.ok) {
@@ -1356,17 +1360,17 @@
         const detailed = await detailsResp.json();
         state.selectedItem = detailed;
         if (detailed.is_favorite !== undefined) {
-          if (detailed.is_favorite) state.favoritesSet.add(item.id);
-          else state.favoritesSet.delete(item.id);
+          if (detailed.is_favorite) state.favoritesSet.add(itemId);
+          else state.favoritesSet.delete(itemId);
           updateFavoriteButtonUI(detailed.is_favorite);
         }
         updateModalWithDetails(detailed, targetEpisode || (state.resumeProgress && state.resumeProgress.episode_number));
       } else {
-        updateModalWithDetails(item, targetEpisode);
+        updateModalWithDetails(normalizedItem, targetEpisode);
       }
     } catch (err) {
       console.warn("Could not enrich item details:", err);
-      updateModalWithDetails(item, targetEpisode);
+      updateModalWithDetails(normalizedItem, targetEpisode);
     }
   }
 

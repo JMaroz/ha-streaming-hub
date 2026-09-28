@@ -333,6 +333,14 @@ class StreamingCommunityClient:
             available=is_available,
         )
 
+        raw_age = item.get("age")
+        certification = None
+        if raw_age is not None:
+            clean_age = str(raw_age).strip().lstrip("+")
+            certification = f"{clean_age}+" if clean_age.isdigit() else str(raw_age)
+        elif item.get("adult") or item.get("is_adult"):
+            certification = "VM18"
+
         return Movie(
             id=f"sc-{sc_id}",
             title=name,
@@ -343,6 +351,7 @@ class StreamingCommunityClient:
             genres=genres,
             duration=item.get("runtime"),
             rating=rating,
+            certification=certification,
             cast=cast_list,
             director=director_name,
             streamingcommunity_url=sc_url,

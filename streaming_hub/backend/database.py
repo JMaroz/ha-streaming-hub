@@ -804,14 +804,23 @@ class MediaDatabase:
         with self._get_connection() as conn:
             cursor = conn.execute(
                 """
-                SELECT title_id, media_type, title, poster_url, added_at
-                FROM favorites
-                WHERE profile_id = ?
-                ORDER BY added_at DESC
+                SELECT f.title_id, f.media_type, f.title, f.poster_url, f.added_at,
+                       t.backdrop_url, t.description, t.year, t.rating, t.duration
+                FROM favorites f
+                LEFT JOIN titles t ON f.title_id = t.id
+                WHERE f.profile_id = ?
+                ORDER BY f.added_at DESC
                 """,
                 (profile_id,),
             )
-            return [dict(row) for row in cursor.fetchall()]
+            rows = cursor.fetchall()
+            results = []
+            for row in rows:
+                r = dict(row)
+                r["id"] = r["title_id"]
+                r["type"] = r["media_type"]
+                results.append(r)
+            return results
 
     async def is_favorite(self, title_id: str, profile_id: str = "default") -> bool:
         """Check if a title is favorited by profile."""
