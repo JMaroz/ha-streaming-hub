@@ -416,6 +416,14 @@ class StreamingCommunityClient:
                 elif isinstance(s, int):
                     seasons.append(TvSeason(number=s, episodes=[]))
 
+        raw_age = item.get("age")
+        certification = None
+        if raw_age is not None:
+            clean_age = str(raw_age).strip().lstrip("+")
+            certification = f"{clean_age}+" if clean_age.isdigit() else str(raw_age)
+        elif item.get("adult") or item.get("is_adult"):
+            certification = "VM18"
+
         series_id = f"sc-{sc_id}-{slug}" if slug else f"sc-{sc_id}"
         return TvSeries(
             id=series_id,
@@ -426,6 +434,7 @@ class StreamingCommunityClient:
             description=item.get("plot"),
             genres=genres,
             rating=rating,
+            certification=certification,
             cast=cast_list,
             director=director_name,
             streamingcommunity_url=sc_url,

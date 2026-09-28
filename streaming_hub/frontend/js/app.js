@@ -107,6 +107,7 @@
     modalYear: document.getElementById("modal-year"),
     modalDuration: document.getElementById("modal-duration"),
     modalRating: document.getElementById("modal-rating"),
+    modalCert: document.getElementById("modal-cert"),
     modalTypeBadge: document.getElementById("modal-type-badge"),
     modalGenres: document.getElementById("modal-genres"),
     modalPlot: document.getElementById("modal-plot"),
@@ -891,6 +892,8 @@
       const isTv = item.type === "tv" || !!item.seasons || (item.genres && item.genres.some((g) => g.toLowerCase().includes("serie")));
       const typeLabel = isTv ? "Serie TV" : "Film";
       const ratingLabel = item.rating ? `★ ${item.rating}` : "";
+      const certInfo = formatCertification(item.certification);
+      const certBadgeHtml = certInfo ? `<span class="card-badge-cert ${certInfo.class}">${escapeHtml(certInfo.text)}</span>` : "";
 
       // Determine catalog badges
       let catalogsList = [];
@@ -932,6 +935,7 @@
           <img class="card-poster" src="${posterSrc}" alt="${escapeHtml(item.title)}" loading="lazy">
           <div class="card-badges">
             <span class="card-badge-type">${typeLabel}</span>
+            ${certBadgeHtml}
             ${ratingLabel ? `<span class="card-badge-rating">${ratingLabel}</span>` : ""}
           </div>
         </div>
@@ -991,6 +995,45 @@
       return `${h}:${pad(remM)}:${pad(remS)}`;
     }
     return `${remM}:${pad(remS)}`;
+  }
+
+  // Helper: Format certification / PEGI badge
+  function formatCertification(rawCert) {
+    if (!rawCert) return null;
+    const cert = String(rawCert).trim().toUpperCase();
+    if (!cert || cert === "ALL" || cert === "TUTTI" || cert === "NONE" || cert === "DEFAULT") return null;
+
+    if (cert.includes("18") || cert.includes("VM18") || cert === "TV-MA" || cert === "NC-17" || cert === "R" || cert === "XXX" || cert === "ADULT") {
+      return { text: "PEGI 18", class: "badge-cert-18" };
+    }
+    if (cert.includes("16") || cert.includes("VM16")) {
+      return { text: "PEGI 16", class: "badge-cert-16" };
+    }
+    if (cert.includes("14") || cert.includes("VM14") || cert === "TV-14") {
+      return { text: "PEGI 14", class: "badge-cert-14" };
+    }
+    if (cert.includes("12") || cert.includes("PG-13")) {
+      return { text: "PEGI 12", class: "badge-cert-12" };
+    }
+    if (cert.includes("7") || cert.includes("6") || cert === "PG" || cert === "TV-PG" || cert === "TV-Y7") {
+      return { text: "PEGI 7", class: "badge-cert-6" };
+    }
+    if (cert === "T" || cert === "0" || cert === "G" || cert === "TV-Y" || cert === "TV-G" || cert.includes("KIDS") || cert.includes("BAMBINI")) {
+      return { text: "Per Tutti", class: "badge-cert-0" };
+    }
+    return { text: cert, class: "badge-cert" };
+  }
+
+  function updateCertBadge(rawCert) {
+    if (!elements.modalCert) return;
+    const certInfo = formatCertification(rawCert);
+    if (certInfo) {
+      elements.modalCert.textContent = certInfo.text;
+      elements.modalCert.className = `badge ${certInfo.class}`;
+      elements.modalCert.classList.remove("hidden");
+    } else {
+      elements.modalCert.classList.add("hidden");
+    }
   }
 
   // All Shelves Refresh
@@ -1314,6 +1357,7 @@
     elements.modalYear.textContent = item.year || "";
     elements.modalDuration.textContent = item.duration ? `${item.duration} min` : "";
     elements.modalRating.textContent = item.rating ? `★ ${item.rating}` : "";
+    updateCertBadge(item.certification);
     elements.modalTypeBadge.textContent = mediaType === "tv" ? "Serie TV" : "Film";
     elements.modalPlot.textContent = item.description || "Caricamento trama arricchita...";
 
@@ -1345,6 +1389,12 @@
         fetch(apiUrl(`api/catalog/title/${mediaType}/${itemId}?profile_id=${encodeURIComponent(state.activeProfileId)}`)),
         fetch(apiUrl(`api/history/progress/${itemId}?profile_id=${encodeURIComponent(state.activeProfileId)}`)),
       ]);
+
+      if (detailsResp.status === 403) {
+        closeModal();
+        showToast("Contenuto non disponibile per il profilo selezionato (restrizione d'età). 🛑", "error");
+        return;
+      }
 
       if (progResp.ok) {
         const progData = await progResp.json();
@@ -1379,6 +1429,7 @@
     if (item.backdrop_url) elements.modalBackdropImg.style.backgroundImage = `url("${item.backdrop_url}")`;
     if (item.duration) elements.modalDuration.textContent = `${item.duration} min`;
     if (item.rating) elements.modalRating.textContent = `★ ${item.rating}`;
+    updateCertBadge(item.certification);
 
     // Cast section
     if (item.cast && item.cast.length > 0) {

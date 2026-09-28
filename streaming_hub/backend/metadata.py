@@ -276,19 +276,22 @@ class MetadataEnricher:
         if meta.get("runtime") and not movie.duration:
             movie.duration = int(meta["runtime"])
 
-        # Extract certification (Italian priority, then US)
+        # Extract certification (Italian priority, then US, then any)
         release_dates = meta.get("release_dates", {})
         if isinstance(release_dates, dict) and "results" in release_dates:
             results = release_dates.get("results", [])
             it_entry = next((r for r in results if r.get("iso_3166_1") == "IT"), None)
             us_entry = next((r for r in results if r.get("iso_3166_1") == "US"), None)
-            target_entry = it_entry or us_entry
+            target_entry = it_entry or us_entry or (results[0] if results else None)
             if target_entry:
                 for rd in target_entry.get("release_dates", []):
                     cert = rd.get("certification")
                     if cert:
-                        movie.certification = cert
+                        movie.certification = str(cert)
                         break
+
+        if not movie.certification and meta.get("certification"):
+            movie.certification = str(meta["certification"])
 
         if meta.get("genres"):
             genres = []
@@ -341,15 +344,18 @@ class MetadataEnricher:
             with contextlib.suppress(Exception):
                 series.rating = round(float(meta["imdbRating"]), 1)
 
-        # Extract TV content ratings (Italian priority, then US)
+        # Extract TV content ratings (Italian priority, then US, then any)
         content_ratings = meta.get("content_ratings", {})
         if isinstance(content_ratings, dict) and "results" in content_ratings:
             results = content_ratings.get("results", [])
             it_entry = next((r for r in results if r.get("iso_3166_1") == "IT"), None)
             us_entry = next((r for r in results if r.get("iso_3166_1") == "US"), None)
-            target = it_entry or us_entry
+            target = it_entry or us_entry or (results[0] if results else None)
             if target and target.get("rating"):
-                series.certification = target.get("rating")
+                series.certification = str(target.get("rating"))
+
+        if not series.certification and meta.get("certification"):
+            series.certification = str(meta["certification"])
 
         if meta.get("genres"):
             genres = []

@@ -24,6 +24,11 @@ from .ha_client import HACoreClient
 from .metadata import MetadataEnricher
 from .models import Movie, Profile, ProviderSource, TvSeries
 from .proxy import StreamProxy
+from .rating_filter import (
+    get_profile_by_id as filter_get_profile_by_id,
+    get_profile_max_rating,
+    is_title_allowed_for_profile,
+)
 from .sources.cb01_source import CB01Source
 from .sources.detector import SourceDetector
 from .sources.manager import SourceManager
@@ -319,10 +324,7 @@ def get_ingress_path(request: Request) -> str:
 def get_profile_by_id(profile_id: str) -> Profile:
     """Find profile by id or fallback to first/default profile."""
     profiles: list[Profile] = CONFIG.get("profiles", [])
-    for p in profiles:
-        if p.id == profile_id:
-            return p
-    return profiles[0] if profiles else Profile(id="default", name="Principale")
+    return filter_get_profile_by_id(profile_id, profiles)
 
 
 def get_profile_trakt_client(profile: Profile) -> TraktClient | None:
@@ -330,113 +332,6 @@ def get_profile_trakt_client(profile: Profile) -> TraktClient | None:
     if not profile.trakt_client_id:
         return None
     return TraktClient(client_id=profile.trakt_client_id, access_token=profile.trakt_access_token)
-
-
-# Rating Hierarchy: T (0) -> 6+ (6) -> 14+ (14) -> 18+ (18) -> ALL (99)
-RATING_MAP: dict[str, int] = {
-    "T": 0, "0": 0, "G": 0, "TV-Y": 0, "TV-G": 0, "PEGI 3": 0, "PEGI 0": 0,
-    "6+": 6, "6": 6, "PG": 6, "TV-Y7": 6, "TV-PG": 6, "PEGI 7": 6, "PEGI 6": 6,
-    "14+": 14, "14": 14, "VM14": 14, "12+": 12, "12": 12, "PG-13": 13, "TV-14": 14,
-    "16+": 16, "16": 16, "PEGI 12": 12, "PEGI 14": 14, "PEGI 16": 16,
-    "18+": 18, "18": 18, "VM18": 18, "R": 17, "NC-17": 18, "TV-MA": 18, "PEGI 18": 18,
-    "ALL": 99,
-}
-
-def get_profile_max_rating(profile: Profile) -> int:
-    """Parse profile rating filter into maximum numerical age limit."""
-    filter_val = str(profile.rating_filter or "ALL").upper().strip()
-    if filter_val in ("ALL", "", "NONE"):
-        return 99
-    if filter_val in RATING_MAP:
-        return RATING_MAP[filter_val]
-    # Check digits like '7', '12', '14', '18'
-    digits = "".join(ch for ch in filter_val if ch.isdigit())
-    if digits:
-        val = int(digits)
-        return 0 if val <= 3 else val
-    return 99
-
-# Content classification definitions
-ADULT_KEYWORDS = {
-    "erotico", "erotica", "erotismo", "adulti", "adult", "pornografico",
-    "porno", "softcore", "hardcore", "hentai", "sexy", "red light",
-    "vm18", "18+", "xxx", "erotic"
-}
-
-KIDS_RESTRICTED_KEYWORDS = {
-    "horror", "splatter", "gore", "crime", "thriller", "giallo",
-    "poliziesco", "guerra", "war", "psicologico", "mistero", "violenza"
-}
-
-UNSAFE_TITLE_KEYWORDS = {
-    "resident evil", "unabomber", "kill", "killer", "assassin", "blood",
-    "dead", "death", "zombie", "horror", "morte", "sangue", "massacro",
-    "omicidio", "delitto", "erotico", "sesso", "sex", "alien", "predator",
-    "nightmare", "saw", "demon", "diavolo", "satana", "evil", "terror"
-}
-
-FAMILY_FRIENDLY_KEYWORDS = {
-    "animazione", "animation", "famiglia", "family", "kids", "bambini",
-    "ragazzi", "children", "avventura", "adventure", "musica", "music",
-    "commedia", "comedy", "documentario", "documentary", "fantasy", "fiaba"
-}
-
-
-def is_title_allowed_for_profile(title_item: Movie | TvSeries | dict[str, Any], profile: Profile) -> bool:
-    """Determine if a title passes the profile's content classification filter."""
-    max_allowed = get_profile_max_rating(profile)
-    if max_allowed >= 99:
-        return True
-
-    # Extract title, certification, and genres
-    if isinstance(title_item, dict):
-        title = str(title_item.get("title") or "").lower()
-        cert = str(title_item.get("certification") or "").upper().strip()
-        genres = [str(g).lower() for g in title_item.get("genres") or []]
-        desc = str(title_item.get("description") or "").lower()
-    else:
-        title = str(getattr(title_item, "title", "") or "").lower()
-        cert = str(getattr(title_item, "certification", "") or "").upper().strip()
-        genres = [str(g).lower() for g in getattr(title_item, "genres", []) or []]
-        desc = str(getattr(title_item, "description", "") or "").lower()
-
-    combined_text = f"{title} {' '.join(genres)} {desc[:200]}"
-
-    # For any profile under 18: strictly block adult / erotic content
-    if max_allowed < 18:
-        if any(ak in combined_text for ak in ADULT_KEYWORDS):
-            return False
-
-    # Check explicit certification if available
-    if cert:
-        score = RATING_MAP.get(cert)
-        if score is None:
-            clean_digits = "".join(ch for ch in cert if ch.isdigit())
-            score = int(clean_digits) if clean_digits else None
-        if score is not None:
-            return score <= max_allowed
-
-    # Fallback heuristic when certification is not explicitly tagged
-    if max_allowed <= 6:
-        # Kids / Children profile (T or 6+ / PEGI 3 / PEGI 7)
-        if any(rk in combined_text for rk in KIDS_RESTRICTED_KEYWORDS):
-            return False
-        if any(uk in title for uk in UNSAFE_TITLE_KEYWORDS):
-            return False
-
-        # If profile is 'T' (0) - strict family / kids content only
-        if max_allowed == 0:
-            if genres and not any(fk in " ".join(genres) for fk in FAMILY_FRIENDLY_KEYWORDS):
-                return False
-
-    elif max_allowed <= 14:
-        # Teen profile (12+ / 14+ / PEGI 12 / PEGI 14)
-        if any(w in combined_text for w in ("splatter", "gore", "extreme horror", "hardcore")):
-            return False
-        if any(uk in title for uk in ("erotico", "porno", "sesso", "xxx")):
-            return False
-
-    return True
 
 
 
@@ -698,6 +593,8 @@ async def get_title_details(media_type: str, title_id: str, profile_id: str = Qu
     # Check SQLite cache first for instant response
     cached = await db.get_title(title_id)
     if cached:
+        if not is_title_allowed_for_profile(cached, profile):
+            raise HTTPException(status_code=403, detail="Contenuto non disponibile per il profilo selezionato (restrizione d'età).")
         # Check favorite status for this profile
         cached["is_favorite"] = await db.is_favorite(title_id, profile_id=profile.id)
         return cached
@@ -721,6 +618,10 @@ async def get_title_details(media_type: str, title_id: str, profile_id: str = Qu
 
     # Persist in SQLite
     await db.save_title(item)
+
+    if not is_title_allowed_for_profile(item, profile):
+        raise HTTPException(status_code=403, detail="Contenuto non disponibile per il profilo selezionato (restrizione d'età).")
+
     data = item.to_dict()
     data["is_favorite"] = await db.is_favorite(title_id, profile_id=profile.id)
     return data

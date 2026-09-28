@@ -292,6 +292,21 @@ body {
 .badge-rating { background: rgba(245, 158, 11, 0.25); color: var(--accent-gold); }
 .badge-year { background: rgba(255, 255, 255, 0.12); color: #cbd5e1; }
 .badge-duration { background: rgba(255, 255, 255, 0.08); color: #94a3b8; }
+.badge-cert { background: rgba(148, 163, 184, 0.2); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.3); }
+.badge-cert-18 { background: rgba(225, 29, 72, 0.3); color: #fb7185; border: 1px solid rgba(225, 29, 72, 0.5); }
+.badge-cert-16 { background: rgba(234, 88, 12, 0.3); color: #fdba74; border: 1px solid rgba(234, 88, 12, 0.5); }
+.badge-cert-14 { background: rgba(217, 119, 6, 0.3); color: #fcd34d; border: 1px solid rgba(217, 119, 6, 0.5); }
+.badge-cert-12 { background: rgba(161, 98, 7, 0.25); color: #fef08a; border: 1px solid rgba(161, 98, 7, 0.4); }
+.badge-cert-6 { background: rgba(16, 185, 129, 0.25); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.4); }
+.badge-cert-0 { background: rgba(59, 130, 246, 0.25); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); }
+
+.card-badge-cert {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  line-height: 1.2;
+}
 
 .hero-title {
   font-size: 2.4rem;
