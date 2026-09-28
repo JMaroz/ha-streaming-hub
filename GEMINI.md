@@ -15,3 +15,13 @@
   - GitHub release titles and release notes (`gh release create`)
   - `CHANGELOG.md` entries
   - Project documentation and README files
+
+## Development Workflow & CI/CD
+- **Linting & Formatting**: 
+  - Backend (Python) code MUST comply with `ruff` rules defined in `pyproject.toml`. 
+  - Always run `script/lint` or rely on `pre-commit` before pushing code.
+- **Releases**: 
+  - We use [Release Please](https://github.com/googleapis/release-please). 
+  - Ensure all commit messages strictly follow the Conventional Commits specification to allow automatic version bumps in `streaming_hub/config.yaml` and CHANGELOG generation.
+- **Local Setup**: 
+  - Use `script/setup` to initialize the workspace with `uv` and `pre-commit` hooks.
