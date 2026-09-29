@@ -1,0 +1,12 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+# ==============================================================================
+# Home Assistant App: Streaming Hub
+# Service finish handling
+# ==============================================================================
+
+if [[ "${1}" -ne 0 ]] && [[ "${1}" -ne 256 ]]; then
+    bashio::log.warning "Streaming Hub service terminato in modo imprevisto con codice ${1}."
+else
+    bashio::log.info "Streaming Hub service terminato normalmente."
+fi
