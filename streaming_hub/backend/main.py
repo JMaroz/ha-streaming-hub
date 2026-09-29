@@ -29,10 +29,10 @@ from .rating_filter import (
     get_profile_max_rating,
     is_title_allowed_for_profile,
 )
-from .sources.cb01_source import CB01Source
+from .sources.crawler_source import CrawlerSource
 from .sources.detector import SourceDetector
 from .sources.manager import SourceManager
-from .sources.streamingcommunity_source import StreamingCommunitySource
+from .sources.reactive_source import ReactiveSource
 from .trakt_client import TraktClient
 from .utils import CatalogMerger
 
@@ -86,13 +86,13 @@ def load_options() -> dict[str, Any]:
             })
 
     # Backward compatibility with single URL env vars if explicitly set by user
-    sc_env = os.getenv("STREAMINGCOMMUNITY_BASE_URL", "").strip()
+    sc_env = os.getenv("SOURCE_ALPHA_BASE_URL", "").strip() or os.getenv("STREAMINGCOMMUNITY_BASE_URL", "").strip()
     if sc_env and not any(s["url"] == sc_env for s in normalized_sources):
-        normalized_sources.append({"url": sc_env, "type": "streamingcommunity", "name": "StreamingCommunity", "enabled": True})
+        normalized_sources.append({"url": sc_env, "type": "reactive", "name": "Sorgente Reattiva", "enabled": True})
 
-    cb_env = os.getenv("CB01_BASE_URL", "").strip()
+    cb_env = os.getenv("SOURCE_BETA_BASE_URL", "").strip() or os.getenv("CB01_BASE_URL", "").strip()
     if cb_env and not any(s["url"] == cb_env for s in normalized_sources):
-        normalized_sources.append({"url": cb_env, "type": "cb01", "name": "CB01", "enabled": True})
+        normalized_sources.append({"url": cb_env, "type": "crawler", "name": "Sorgente Web", "enabled": True})
 
     options["custom_sources"] = normalized_sources
 
@@ -169,22 +169,22 @@ async def init_sources(sources_list: list[dict[str, Any]], custom_dns: str) -> N
             detected_type = await SourceDetector.detect(url, user_specified_type=user_type, session=session)
             _LOGGER.info("Configuring source #%d: %s -> detected type: %s", idx + 1, url, detected_type)
 
-            if detected_type == "streamingcommunity":
+            if detected_type in ("reactive", "streamingcommunity"):
                 source_manager.register_source(
-                    StreamingCommunitySource(
+                    ReactiveSource(
                         base_url=url,
                         custom_dns=custom_dns,
                         enabled=is_enabled,
-                        name=custom_name or "StreamingCommunity",
+                        name=custom_name or "Sorgente Reattiva",
                     )
                 )
-            elif detected_type == "cb01":
+            elif detected_type in ("crawler", "cb01"):
                 source_manager.register_source(
-                    CB01Source(
+                    CrawlerSource(
                         base_url=url,
                         custom_dns=custom_dns,
                         enabled=is_enabled,
-                        name=custom_name or "CB01",
+                        name=custom_name or "Sorgente Web",
                     )
                 )
             else:
@@ -379,7 +379,7 @@ async def test_source_url(req: TestSourceRequest) -> dict[str, Any]:
         "url": clean_url,
         "specified_type": req.type,
         "detected_type": detected,
-        "supported": detected in ("streamingcommunity", "cb01"),
+        "supported": detected in ("reactive", "crawler", "streamingcommunity", "cb01"),
     }
 
 

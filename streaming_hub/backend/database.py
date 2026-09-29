@@ -73,8 +73,8 @@ class MediaDatabase:
                     certification TEXT,
                     cast_list TEXT,
                     director TEXT,
-                    streamingcommunity_url TEXT,
-                    cb01_url TEXT,
+                    source_a_url TEXT,
+                    source_b_url TEXT,
                     tmdb_id INTEGER,
                     imdb_id TEXT,
                     trakt_id INTEGER,
@@ -118,6 +118,26 @@ class MediaDatabase:
             """)
 
             # 2. Safe SQLite Schema Migrations for existing user databases
+            try:
+                conn.execute("ALTER TABLE titles ADD COLUMN source_a_url TEXT;")
+            except Exception:
+                pass
+
+            try:
+                conn.execute("ALTER TABLE titles ADD COLUMN source_b_url TEXT;")
+            except Exception:
+                pass
+
+            try:
+                conn.execute("UPDATE titles SET source_a_url = streamingcommunity_url WHERE source_a_url IS NULL AND streamingcommunity_url IS NOT NULL;")
+            except Exception:
+                pass
+
+            try:
+                conn.execute("UPDATE titles SET source_b_url = cb01_url WHERE source_b_url IS NULL AND cb01_url IS NOT NULL;")
+            except Exception:
+                pass
+
             try:
                 conn.execute("ALTER TABLE titles ADD COLUMN certification TEXT;")
             except Exception:
@@ -175,7 +195,7 @@ class MediaDatabase:
                     id, media_type, title, original_title, year,
                     poster_url, backdrop_url, description, genres,
                     duration, rating, certification, cast_list, director,
-                    streamingcommunity_url, cb01_url,
+                    source_a_url, source_b_url,
                     tmdb_id, imdb_id, trakt_id, catalogs, sources, raw_json, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(id) DO UPDATE SET
@@ -191,8 +211,8 @@ class MediaDatabase:
                     certification=COALESCE(excluded.certification, titles.certification),
                     cast_list=excluded.cast_list,
                     director=COALESCE(excluded.director, titles.director),
-                    streamingcommunity_url=COALESCE(excluded.streamingcommunity_url, titles.streamingcommunity_url),
-                    cb01_url=COALESCE(excluded.cb01_url, titles.cb01_url),
+                    source_a_url=COALESCE(excluded.source_a_url, titles.source_a_url),
+                    source_b_url=COALESCE(excluded.source_b_url, titles.source_b_url),
                     tmdb_id=COALESCE(excluded.tmdb_id, titles.tmdb_id),
                     imdb_id=COALESCE(excluded.imdb_id, titles.imdb_id),
                     trakt_id=COALESCE(excluded.trakt_id, titles.trakt_id),
@@ -216,8 +236,8 @@ class MediaDatabase:
                     getattr(item, "certification", None),
                     cast_json,
                     item.director,
-                    getattr(item, "streamingcommunity_url", None),
-                    getattr(item, "cb01_url", None),
+                    getattr(item, "source_a_url", None) or getattr(item, "streamingcommunity_url", None),
+                    getattr(item, "source_b_url", None) or getattr(item, "cb01_url", None),
                     item.tmdb_id,
                     item.imdb_id,
                     getattr(item, "trakt_id", None),
@@ -270,7 +290,7 @@ class MediaDatabase:
                 chunk = keys[i : i + chunk_size]
                 placeholders = ",".join("?" * len(chunk))
                 cursor = conn.execute(
-                    f"SELECT id, certification, genres, tmdb_id, streamingcommunity_url, cb01_url FROM titles WHERE id IN ({placeholders})",
+                    f"SELECT id, certification, genres, tmdb_id, source_a_url, source_b_url FROM titles WHERE id IN ({placeholders})",
                     chunk,
                 )
                 for row in cursor.fetchall():
@@ -280,8 +300,8 @@ class MediaDatabase:
                         continue
                     cert = row["certification"]
                     raw_g = row["genres"]
-                    sc_url = row["streamingcommunity_url"]
-                    cb_url = row["cb01_url"]
+                    src_a = row["source_a_url"]
+                    src_b = row["source_b_url"]
 
                     if cert:
                         if isinstance(target, dict):
@@ -300,16 +320,16 @@ class MediaDatabase:
                                         target.genres = g_list
                         except Exception:
                             pass
-                    if sc_url:
-                        if isinstance(target, dict) and not target.get("streamingcommunity_url"):
-                            target["streamingcommunity_url"] = sc_url
-                        elif not getattr(target, "streamingcommunity_url", None):
-                            target.streamingcommunity_url = sc_url
-                    if cb_url:
-                        if isinstance(target, dict) and not target.get("cb01_url"):
-                            target["cb01_url"] = cb_url
-                        elif not getattr(target, "cb01_url", None):
-                            target.cb01_url = cb_url
+                    if src_a:
+                        if isinstance(target, dict) and not target.get("source_a_url"):
+                            target["source_a_url"] = src_a
+                        elif not getattr(target, "source_a_url", None):
+                            target.source_a_url = src_a
+                    if src_b:
+                        if isinstance(target, dict) and not target.get("source_b_url"):
+                            target["source_b_url"] = src_b
+                        elif not getattr(target, "source_b_url", None):
+                            target.source_b_url = src_b
 
     async def get_titles_by_genre(
         self,

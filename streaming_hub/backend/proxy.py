@@ -116,6 +116,7 @@ class StreamProxy:
                             or "playlist" in lower_orig
                             or "rendition=" in lower_orig
                             or "type=audio" in lower_orig
+                            or "type=subtitle" in lower_orig
                             or "type=subtitles" in lower_orig
                             or "type=video" in lower_orig
                         )
@@ -123,7 +124,7 @@ class StreamProxy:
                         proxy_uri = f"{prefix}/{endpoint}/{token}?url={urllib.parse.quote(abs_uri, safe='')}"
                         return f'URI="{proxy_uri}"'
 
-                    line = re.sub(r'URI="([^"]+)"', _replace_uri, stripped)
+                    line = re.sub(r'URI=["\']([^"\']+)["\']', _replace_uri, stripped)
                 rewritten.append(line)
             else:
                 abs_uri = urllib.parse.urljoin(base_url, stripped)
@@ -134,6 +135,8 @@ class StreamProxy:
                     or "rendition=" in lower_stripped
                     or "type=video" in lower_stripped
                     or "type=audio" in lower_stripped
+                    or "type=subtitle" in lower_stripped
+                    or "type=subtitles" in lower_stripped
                 )
                 endpoint = "stream" if is_playlist else "segment"
                 proxy_uri = f"{prefix}/{endpoint}/{token}?url={urllib.parse.quote(abs_uri, safe='')}"
@@ -224,6 +227,8 @@ class StreamProxy:
             or "rendition=" in lower_url
             or "type=video" in lower_url
             or "type=audio" in lower_url
+            or "type=subtitle" in lower_url
+            or "type=subtitles" in lower_url
         ):
             return await self.get_stream_response(
                 token, target_url=segment_url, root_path=root_path, headers_override=headers_override, method=method
@@ -246,7 +251,27 @@ class StreamProxy:
             )
 
             status_code = upstream_resp.status
-            content_type = upstream_resp.headers.get("Content-Type", "video/MP2T")
+            if status_code >= 400:
+                upstream_resp.close()
+                raise HTTPException(
+                    status_code=status_code,
+                    detail=f"Upstream returned HTTP {status_code}",
+                )
+
+            raw_content_type = upstream_resp.headers.get("Content-Type", "")
+
+            # Classify content type according to segment format
+            if lower_url.endswith(".key") or "/enc.key" in lower_url or ".key?" in lower_url:
+                content_type = "application/octet-stream"
+            elif lower_url.endswith(".vtt") or ".vtt?" in lower_url or "subs-" in lower_url:
+                content_type = "text/vtt"
+            elif ".m4s" in lower_url or ".mp4" in lower_url:
+                content_type = "video/mp4"
+            elif raw_content_type.lower().startswith("text/") or not raw_content_type:
+                # CDN disguised media chunk (e.g. video/audio chunk disguised as .html)
+                content_type = "video/MP2T"
+            else:
+                content_type = raw_content_type
 
             out_headers: dict[str, str] = {
                 "Content-Type": content_type,
@@ -254,14 +279,17 @@ class StreamProxy:
                 "Cache-Control": "public, max-age=3600",
             }
 
-            # Forward Content-Range and Accept-Ranges without Content-Length
+            # Forward Content-Range and Accept-Ranges
             for header_name in ("Content-Range", "Accept-Ranges"):
                 if header_name in upstream_resp.headers:
                     out_headers[header_name] = upstream_resp.headers[header_name]
 
-            # If client made a HEAD request (e.g. Philips TV or Chromecast probing chunk), respond immediately without body
+            # If client made a HEAD request (e.g. Philips TV or Chromecast probing chunk)
             if method.upper() == "HEAD":
                 upstream_resp.close()
+                # Forward Content-Length from upstream so ExoPlayer / Cast does not receive length 0
+                if "Content-Length" in upstream_resp.headers:
+                    out_headers["Content-Length"] = upstream_resp.headers["Content-Length"]
                 return Response(
                     status_code=status_code,
                     headers=out_headers,
@@ -284,13 +312,17 @@ class StreamProxy:
                     },
                 )
 
-            # Correct content-type if CDN incorrectly served binary segment with text/html or text/plain
-            if content_type.startswith("text/"):
+            # Refine media content type based on binary signature if applicable
+            if not (lower_url.endswith(".key") or "/enc.key" in lower_url or ".key?" in lower_url or lower_url.endswith(".vtt") or ".vtt?" in lower_url):
                 if raw_bytes.startswith(b"\x00\x00\x00") or b"ftyp" in raw_bytes[:32]:
                     content_type = "video/mp4"
-                else:
+                elif b"WEBVTT" in raw_bytes[:32]:
+                    content_type = "text/vtt"
+                elif content_type.lower().startswith("text/"):
                     content_type = "video/MP2T"
                 out_headers["Content-Type"] = content_type
+
+            out_headers["Content-Length"] = str(len(raw_bytes))
 
             return Response(
                 content=raw_bytes,
@@ -298,6 +330,8 @@ class StreamProxy:
                 headers=out_headers,
                 media_type=content_type,
             )
+        except HTTPException:
+            raise
         except Exception as err:
             _LOGGER.error("Error fetching segment %s: %s", segment_url, err)
             raise HTTPException(status_code=502, detail=f"Bad Gateway: {err}")

@@ -9,7 +9,7 @@
 
 ## Caratteristiche Principali
 
-- **Architettura BYOS & Auto-Discriminazione**: Inserisci i tuoi indirizzi web; Streaming Hub identifica automaticamente il motore compatibile (es. StreamingCommunity, CB01 o motori personalizzati) analizzando il markup HTML e i tag fingerprint.
+- **Architettura BYOS & Auto-Discriminazione**: Inserisci i tuoi indirizzi web; Streaming Hub identifica automaticamente il motore compatibile (es. motori reattivi SPA o crawler semantici HTML) analizzando il markup e i tag fingerprint.
 - **Interfaccia Ingress Moderna**: UI reattiva in stile streaming (dark mode, locandine HD, trame, filtro per genere e ricerca istantanea).
 - **Player HLS Integrato**: Riproduzione fluida direttamente nel browser o nell'app mobile Home Assistant senza plugin aggiuntivi.
 - **Supporto Google Cast & Smart TV**: Integrazione diretta con le entità `media_player` di Home Assistant tramite `SUPERVISOR_TOKEN`.
@@ -52,7 +52,7 @@ stream_port: 8099
 | Opzione | Tipo | Predefinito | Descrizione |
 |---|---|---|---|
 | `log_level` | list | `info` | Livello di log dell'app (`trace`, `debug`, `info`, `warning`, `error`). |
-| `custom_sources` | list | `[]` | Elenco di oggetti o URL delle sorgenti web personali. Il tipo può essere `auto`, `streamingcommunity` o `cb01`. |
+| `custom_sources` | list | `[]` | Elenco di oggetti o URL delle sorgenti web personali. Il tipo può essere `auto`, `reactive` o `crawler`. |
 | `custom_dns` | list | `cloudflare` | Provider DNS-over-HTTPS (`cloudflare`, `google`, `quad9`, `system`). |
 | `tmdb_api_key` | string | `""` | Chiave API TMDb opzionale per locandine e dettagli arricchiti. |
 | `stream_port` | port | `8099` | Porta HTTP del proxy HLS per la rete locale. |

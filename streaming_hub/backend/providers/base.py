@@ -18,12 +18,12 @@ class StreamingProvider(ABC):
     @property
     @abstractmethod
     def provider_id(self) -> str:
-        """Unique identifier for this provider (e.g. 'streamingcommunity')."""
+        """Unique identifier for this provider (e.g. 'reactive', 'maxstream')."""
 
     @property
     @abstractmethod
     def display_name(self) -> str:
-        """Human-readable display name (e.g. 'StreamingCommunity')."""
+        """Human-readable display name (e.g. 'Reactive', 'Maxstream')."""
 
     @abstractmethod
     async def can_handle(self, url: str) -> bool:

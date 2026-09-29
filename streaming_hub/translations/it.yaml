@@ -6,7 +6,7 @@ configuration:
   custom_sources:
     name: "Sorgenti di Streaming Personalizzate"
     description: >-
-      Elenco degli indirizzi web (URL) delle tue sorgenti. Il tipo (StreamingCommunity o CB01)
+      Elenco degli indirizzi web (URL) delle tue sorgenti. Il tipo (reattivo o crawler)
       può essere impostato su auto per essere rilevato automaticamente.
   custom_dns:
     name: "Modalità DNS-over-HTTPS"

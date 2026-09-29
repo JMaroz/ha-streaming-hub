@@ -6,8 +6,8 @@ configuration:
   custom_sources:
     name: "Custom Streaming Sources"
     description: >-
-      List of base website URLs for your sources. Type (StreamingCommunity or CB01)
-      can be set to auto for automatic fingerprinting.
+      List of website URLs for your media sources. Type (reactive or crawler)
+      can be set to auto for automatic detection.
   custom_dns:
     name: "DNS-over-HTTPS Mode"
     description: "DNS resolution method to bypass local ISP censorship (Cloudflare, Google, Quad9, or system)."

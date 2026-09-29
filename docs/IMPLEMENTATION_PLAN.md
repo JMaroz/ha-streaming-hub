@@ -1,7 +1,7 @@
 # Implementation Plan: Transizione da Custom Component a Home Assistant App (Streaming Hub)
 
 ## Goal Description
-Esplorare e pianificare la trasformazione del custom component `cb01` (Streaming Hub) in una **Home Assistant App** (denominazione ufficiale degli Add-on a partire da Home Assistant 2026.2), valutando sia l'opzione **Pure App** (applicazione standalone con Ingress) sia l'opzione **Hybrid Architecture** (App di backend con Ingress + Companion Integration leggera per Media Browser e automazioni, pattern adottato da progetti come *Music Assistant* e *Frigate*).
+Esplorare e pianificare l'architettura di **Streaming Hub** come **Home Assistant App** (denominazione ufficiale degli Add-on a partire da Home Assistant 2026.2), valutando sia l'opzione **Pure App** (applicazione standalone con Ingress) sia l'opzione **Hybrid Architecture** (App di backend con Ingress + Companion Integration leggera per Media Browser e automazioni, pattern adottato da progetti come *Music Assistant* e *Frigate*).
 
 L'obiettivo è liberare l'event loop di Home Assistant Core dal carico di video proxying, transcoding FFmpeg e scraping web, offrendo al contempo un'interfaccia utente moderna (stile Netflix/Stremio) con player integrato e gestione avanzata dei flussi di streaming e dei captcha.
 
@@ -66,7 +66,7 @@ flowchart TD
             direction TB
             UI["Web UI (Ingress Panel)"]
             BE["FastAPI / Aiohttp Backend"]
-            Scraper["Provider Engines (StreamingCommunity, CB01)"]
+            Scraper["Provider Engines (Reactive SPA, Crawler HTML)"]
             Proxy["HLS Stream Proxy & FFmpeg Remuxer (Port 8099)"]
             Resolver["DoH & Anti-Bot Resolver"]
         end
@@ -85,7 +85,7 @@ flowchart TD
 
 ## Proposed Changes
 
-La migrazione è strutturata in componenti modulari. L'integrazione esistente in Python contiene già la logica di business principale (`StreamingCommunityClient`, `CB01Client`, `CB01StreamProxy`, `MetadataEnricher`), che può essere riutilizzata come motore dell'App.
+La migrazione è strutturata in componenti modulari. L'integrazione contiene già la logica di business principale (`ReactiveStreamClient`, `CrawlerStreamClient`, `StreamProxy`, `MetadataEnricher`), che può essere riutilizzata come motore dell'App.
 
 ### 1. Struttura del Repository App (Home Assistant App Repository)
 
@@ -126,7 +126,7 @@ options:
 schema:
   custom_sources:
     - url: "url"
-      type: "list(auto|streamingcommunity|cb01)?"
+      type: "list(auto|reactive|crawler)?"
       name: "str?"
   custom_dns: list(cloudflare|google|quad9|system)
   tmdb_api_key: str?
@@ -174,7 +174,7 @@ Entrypoint del server dell'App.
   - `GET /api/catalog/title/{id}`
   - `GET /api/players` (interroga HA Core via `SUPERVISOR_TOKEN` per recuperare i `media_player`)
   - `POST /api/play` (avvia la riproduzione locale o chiama `media_player.play_media` su HA)
-  - `GET /stream/{token}` (proxy HLS identico al nostro `CB01StreamProxy`, con iniezione di `Referer` e `User-Agent`)
+  - `GET /stream/{token}` (proxy HLS identico al nostro `StreamProxy`, con iniezione di `Referer` e `User-Agent`)
 
 #### [NEW] `streaming_hub/backend/ha_client.py`
 Client dedicato per interagire con l'API di Home Assistant tramite `SUPERVISOR_TOKEN`.
@@ -241,7 +241,7 @@ Applicazione web SPA (Single Page Application) incorporata nel pannello Ingress 
 ### 4. Gestione della Companion Integration (Modello Ibrido - Opzionale)
 
 Se si sceglie il modello ibrido (consigliato per non perdere il Media Browser nativo di HA):
-- **Alleggerimento di `custom_components/cb01/`**:
+- **Alleggerimento dell'integrazione personalizzata**:
   - Tutta la logica di scraping, DNS DoH e proxy HLS viene delegata all'App.
   - La companion integration diventa un client ultra-leggero che contatta `http://localhost:8099` (o il container dell'App).
   - Continua a registrare `media_source.py` in Home Assistant per permettere la navigazione dai cruscotti Lovelace nativi e dall'assistente vocale.

@@ -1,12 +1,11 @@
-"""CB01 catalog and stream source adapter."""
+"""Semantic web catalog and stream source adapter."""
 
 from __future__ import annotations
 
 import logging
-from typing import Any
 
-from ..cb01_client import CB01Client
-from ..models import Movie, ProviderSource, ResolvedMedia, TvEpisode, TvSeason, TvSeries
+from ..engine_crawler import CrawlerStreamClient
+from ..models import Movie, ProviderSource, ResolvedMedia, TvSeason, TvSeries
 from ..providers.maxstream import MaxstreamProvider
 from ..providers.mixdrop import MixdropProvider
 from .base import BaseSource
@@ -14,8 +13,8 @@ from .base import BaseSource
 _LOGGER = logging.getLogger(__name__)
 
 
-class CB01Source(BaseSource):
-    """Source adapter for CB01."""
+class CrawlerSource(BaseSource):
+    """Source adapter for semantic web catalogs."""
 
     def __init__(
         self,
@@ -24,12 +23,12 @@ class CB01Source(BaseSource):
         enabled: bool = True,
         name: str | None = None,
     ) -> None:
-        """Initialize CB01 source with user-specified base URL."""
+        """Initialize crawler source with user-specified base URL."""
         self._enabled = enabled
         self._base_url = base_url
-        self._name = name or "CB01"
+        self._name = name or "Sorgente Web"
         self._client = (
-            CB01Client(base_url=base_url, custom_dns=custom_dns)
+            CrawlerStreamClient(base_url=base_url, custom_dns=custom_dns)
             if enabled and base_url
             else None
         )
@@ -39,7 +38,7 @@ class CB01Source(BaseSource):
     @property
     def source_id(self) -> str:
         """Source identifier."""
-        return "cb01"
+        return "crawler"
 
     @property
     def display_name(self) -> str:
@@ -85,55 +84,55 @@ class CB01Source(BaseSource):
         for item in items:
             if self.source_id not in item.catalogs:
                 item.catalogs.append(self.source_id)
-            if media_type == "movie" and isinstance(item, Movie):
-                filtered.append(item)
-            elif media_type == "tv" and isinstance(item, TvSeries):
-                filtered.append(item)
-            elif media_type == "all":
+            if (media_type == "movie" and isinstance(item, Movie)) or (media_type == "tv" and isinstance(item, TvSeries)) or media_type == "all":
                 filtered.append(item)
         return filtered
 
     async def get_details(self, media_type: str, item_id: str) -> Movie | TvSeries:
         """Fetch complete title details."""
         if not self.is_enabled:
-            raise ValueError("CB01 source is disabled")
+            raise ValueError("Crawler source is disabled")
 
         if media_type in ("tv", "series"):
             series = await self._client.get_tv_series(item_id)
             if self.source_id not in series.catalogs:
                 series.catalogs.append(self.source_id)
             return series
-        else:
-            movie = await self._client.get_movie(item_id)
-            if self.source_id not in movie.catalogs:
-                movie.catalogs.append(self.source_id)
-            return movie
+        movie = await self._client.get_movie(item_id)
+        if self.source_id not in movie.catalogs:
+            movie.catalogs.append(self.source_id)
+        return movie
 
     async def get_season(self, series_id: str, season_number: int) -> TvSeason:
         """Fetch season episodes."""
         if not self.is_enabled:
-            raise ValueError("CB01 source is disabled")
+            raise ValueError("Crawler source is disabled")
 
         series = await self._client.get_tv_series(series_id)
         for s in series.seasons:
             if s.number == season_number:
                 return s
-        return TvSeason(number=season_number, episodes=[])
+
+        raise ValueError(f"Season {season_number} not found for {series_id}")
 
     async def resolve_stream(
         self,
         source: ProviderSource,
         prefer_fhd: bool = True,
     ) -> ResolvedMedia:
-        """Resolve stream using provider sub-adapters (Maxstream, Mixdrop)."""
-        import aiohttp
-        async with aiohttp.ClientSession() as session:
-            url_lower = source.page_url.lower()
-            if await self._maxstream.can_handle(url_lower):
-                return await self._maxstream.resolve(source, session, prefer_fhd=prefer_fhd)
-            elif await self._mixdrop.can_handle(url_lower):
-                return await self._mixdrop.resolve(source, session, prefer_fhd=prefer_fhd)
-            raise ValueError(f"No suitable provider adapter found for {source.provider_name} ({source.page_url})")
+        """Resolve embed video link using appropriate provider adapter."""
+        if not self.is_enabled:
+            raise ValueError("Crawler source is disabled")
+
+        prov_id = source.provider_id.lower()
+        if "maxstream" in prov_id:
+            session = await self._client._get_session()
+            return await self._maxstream.resolve(source, session, prefer_fhd=prefer_fhd)
+        if "mixdrop" in prov_id:
+            session = await self._client._get_session()
+            return await self._mixdrop.resolve(source, session, prefer_fhd=prefer_fhd)
+
+        raise ValueError(f"No direct stream provider available for crawler host {source.provider_name}")
 
     async def get_genres(self) -> list[str]:
         """Return available genres."""
@@ -143,15 +142,15 @@ class CB01Source(BaseSource):
 
     async def get_by_genre(self, genre: str, media_type: str = "movie", page: int = 1) -> list[Movie | TvSeries]:
         """Fetch titles by genre."""
-        if not self.is_enabled or media_type == "tv":
+        if not self.is_enabled:
             return []
-        items = await self._client.get_movies_by_genre(genre, page=page)
-        for m in items:
-            if self.source_id not in m.catalogs:
-                m.catalogs.append(self.source_id)
+        items = await self._client.get_by_genre(genre, media_type=media_type, page=page)
+        for item in items:
+            if self.source_id not in item.catalogs:
+                item.catalogs.append(self.source_id)
         return items
 
     async def close(self) -> None:
-        """Close client."""
+        """Close underlying client."""
         if self._client:
             await self._client.close()

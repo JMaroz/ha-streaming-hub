@@ -1,4 +1,4 @@
-"""Async HTTP client for CB01 catalog and metadata."""
+"""Async HTTP client for web catalog and metadata extraction."""
 
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ from urllib.parse import quote_plus, urljoin
 
 import aiohttp
 
+from .crawler_parser import CrawlerCatalogParser
 from .dns_resolver import DNS_DEFAULT, DoHResolver
 from .models import Movie, TvSeries
-from .parser import CB01Parser
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,8 +43,8 @@ USER_AGENT = (
 )
 
 
-class CB01Client:
-    """Asynchronous client for interacting with CB01."""
+class CrawlerStreamClient:
+    """Asynchronous client for extracting media from HTML web catalogs."""
 
     def __init__(
         self,
@@ -52,7 +52,7 @@ class CB01Client:
         custom_dns: str = DNS_DEFAULT,
         session: aiohttp.ClientSession | None = None,
     ) -> None:
-        """Initialize the CB01 client with user-specified base URL."""
+        """Initialize the crawler client with user-specified base URL."""
         self.base_url = (base_url or "").rstrip("/") + "/"
         self.custom_dns = custom_dns
         self._session = session
@@ -60,97 +60,80 @@ class CB01Client:
         self._resolver: DoHResolver | None = None
 
     async def _get_session(self) -> aiohttp.ClientSession:
-        """Get or initialize the aiohttp ClientSession."""
         if self._session and not self._session.closed:
             return self._session
 
-        self._resolver = DoHResolver(mode=self.custom_dns)
-        connector = aiohttp.TCPConnector(resolver=self._resolver, ssl=False)
+        connector = None
+        if self.custom_dns and self.custom_dns != "system":
+            self._resolver = DoHResolver(provider=self.custom_dns)
+            connector = self._resolver.get_connector()
+
+        headers = {
+            "User-Agent": USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
+        }
+
         self._session = aiohttp.ClientSession(
             connector=connector,
-            headers={
-                "User-Agent": USER_AGENT,
-                "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
-            },
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=15),
         )
         self._own_session = True
         return self._session
 
     async def _request(self, url: str) -> str:
-        """Fetch HTML content from a URL with timeout, error handling, and mirror fallback."""
         session = await self._get_session()
         try:
-            async with asyncio.timeout(6):
+            async with asyncio.timeout(10):
                 async with session.get(url, allow_redirects=True) as resp:
                     if resp.status == 200:
-                        if str(resp.url).rstrip("/") == self.base_url.rstrip("/") and url.rstrip(
-                            "/"
-                        ) != self.base_url.rstrip("/"):
-                            raise ValueError(f"URL {url} redirected to homepage")
                         return await resp.text()
-                    _LOGGER.debug("CB01 returned status %s for %s", resp.status, url)
+                    _LOGGER.debug("Crawler source returned status %s for %s", resp.status, url)
         except (TimeoutError, aiohttp.ClientError, ValueError) as err:
-            _LOGGER.debug("CB01 request failed for %s: %s", url, err)
+            _LOGGER.debug("Crawler source request failed for %s: %s", url, err)
 
-        if url.startswith(self.base_url):
-            path_part = url[len(self.base_url) :]
-            candidate_mirrors = [m for m in CB01_MIRRORS_LIST if m.rstrip("/") != self.base_url.rstrip("/")]
-            for mirror in candidate_mirrors:
-                mirror_url = urljoin(mirror, path_part)
-                try:
-                    _LOGGER.debug("Trying alternate CB01 mirror: %s", mirror_url)
-                    async with asyncio.timeout(4):
-                        async with session.get(mirror_url, allow_redirects=True) as resp:
-                            if resp.status == 200:
-                                text = await resp.text()
-                                _LOGGER.info("Switched active CB01 mirror from %s to %s", self.base_url, mirror)
-                                self.base_url = mirror.rstrip("/") + "/"
-                                return text
-                except (TimeoutError, aiohttp.ClientError):
-                    continue
-
-        raise ValueError(f"Could not connect to CB01 or any mirror for {url}")
+        raise ValueError(f"Could not connect to catalog source for {url}")
 
     async def get_latest_movies(self, page: int = 1) -> list[Movie]:
         """Fetch the most recent movies."""
-        movies = await self.get_catalog_page(page)
-        return [m for m in movies if not CB01Parser.is_tv_item(m.title, m.cb01_url, m.genres)]
+        url = self.base_url
+        if page > 1:
+            url = urljoin(self.base_url, f"page/{page}/")
 
-    async def get_movies_by_genre(self, genre: str, page: int = 1) -> list[Movie]:
-        """Fetch movies matching a specific genre."""
-        slug = genre.strip().lower().replace(" ", "-")
-        path = f"genere/{slug}/"
+        html_text = await self._request(url)
+        movies = CrawlerCatalogParser.parse_catalog_page(html_text)
+        return [m for m in movies if not CrawlerCatalogParser.is_tv_item(m.title, m.source_b_url, m.genres)]
+
+    async def get_by_genre(self, genre: str, media_type: str = "movie", page: int = 1) -> list[Movie | TvSeries]:
+        """Fetch titles matching a specific genre."""
+        slug = genre.lower().replace(" ", "-")
+        path = f"category/{slug}/"
         if page > 1:
             path += f"page/{page}/"
         url = urljoin(self.base_url, path)
+
         try:
             html_text = await self._request(url)
-            movies = CB01Parser.parse_catalog_page(html_text)
-            return [m for m in movies if not CB01Parser.is_tv_item(m.title, m.cb01_url, m.genres)]
+            movies = CrawlerCatalogParser.parse_catalog_page(html_text)
+            return [m for m in movies if not CrawlerCatalogParser.is_tv_item(m.title, m.source_b_url, m.genres)]
         except Exception as err:
-            _LOGGER.debug("CB01 genre '%s' fetch failed on %s: %s", genre, url, err)
-            try:
-                search_results = await self.search(genre)
-                return [m for m in search_results if isinstance(m, Movie)]
-            except Exception:
-                return []
+            _LOGGER.debug("Genre '%s' fetch failed on %s: %s", genre, url, err)
+            return []
 
-    async def get_catalog_page(self, page: int = 1) -> list[Movie]:
-        """Fetch a specific page from the catalog."""
-        url = self.base_url if page <= 1 else urljoin(self.base_url, f"page/{page}/")
-        html_text = await self._request(url)
-        movies = CB01Parser.parse_catalog_page(html_text)
-        return [m for m in movies if not CB01Parser.is_tv_item(m.title, m.cb01_url, m.genres)]
+    async def get_latest(self, page: int = 1) -> list[Movie]:
+        """Alias for get_latest_movies."""
+        return await self.get_latest_movies(page=page)
 
     async def search(self, query: str) -> list[Movie | TvSeries]:
-        """Search movies and TV series."""
-        encoded_query = quote_plus(query.strip())
-        url = urljoin(self.base_url, f"?s={encoded_query}")
+        """Search titles by keyword."""
+        url = f"{self.base_url}?s={quote_plus(query)}"
         html_text = await self._request(url)
-        parsed = CB01Parser.parse_catalog_page(html_text)
+
+        parsed = CrawlerCatalogParser.parse_catalog_page(html_text)
         results: list[Movie | TvSeries] = []
         for item in parsed:
-            if CB01Parser.is_tv_item(item.title, item.cb01_url, item.genres):
+            if CrawlerCatalogParser.is_tv_item(item.title, item.source_b_url, item.genres):
                 results.append(
                     TvSeries(
                         id=item.id,
@@ -159,8 +142,8 @@ class CB01Client:
                         poster_url=item.poster_url,
                         description=item.description,
                         genres=item.genres,
-                        cb01_url=item.cb01_url,
-                        catalogs=["cb01"],
+                        source_b_url=item.source_b_url,
+                        catalogs=["crawler"],
                         seasons=[],
                     )
                 )
@@ -176,7 +159,7 @@ class CB01Client:
             url = urljoin(self.base_url, f"{media_id_or_url}/")
 
         html_text = await self._request(url)
-        return CB01Parser.parse_movie_page(html_text, movie_url=url)
+        return CrawlerCatalogParser.parse_movie_page(html_text, movie_url=url)
 
     async def get_latest_tv(self, page: int = 1) -> list[TvSeries]:
         """Fetch the most recent TV series."""
@@ -186,7 +169,7 @@ class CB01Client:
         url = urljoin(self.base_url, path)
 
         html_text = await self._request(url)
-        movies = CB01Parser.parse_catalog_page(html_text)
+        movies = CrawlerCatalogParser.parse_catalog_page(html_text)
         return [
             TvSeries(
                 id=m.id,
@@ -195,8 +178,8 @@ class CB01Client:
                 poster_url=m.poster_url,
                 description=m.description,
                 genres=m.genres,
-                cb01_url=m.cb01_url,
-                catalogs=["cb01"],
+                source_b_url=m.source_b_url,
+                catalogs=["crawler"],
                 seasons=[],
             )
             for m in movies
@@ -212,7 +195,7 @@ class CB01Client:
             url = urljoin(self.base_url, f"{media_id_or_url}/")
 
         html_text = await self._request(url)
-        return CB01Parser.parse_tv_series_page(html_text, series_url=url)
+        return CrawlerCatalogParser.parse_tv_series_page(html_text, series_url=url)
 
     async def get_genres(self) -> list[str]:
         """Return the list of available genres."""

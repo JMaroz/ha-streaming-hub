@@ -1,4 +1,4 @@
-"""HTML and metadata parser for CB01 catalog and movie pages."""
+"""HTML and metadata parser for semantic web catalog and media pages."""
 
 from __future__ import annotations
 
@@ -14,12 +14,12 @@ from urllib.parse import urlparse
 from .models import Movie, ProviderSource, TvEpisode, TvSeason, TvSeries
 
 
-class CB01Parser:
-    """Parser for CB01 HTML documents."""
+class CrawlerCatalogParser:
+    """Parser for HTML web catalog documents and embed sources."""
 
     @staticmethod
     def extract_media_id_from_url(url: str) -> str:
-        """Extract movie slug ID from a CB01 URL."""
+        """Extract media slug ID from a catalog URL."""
         path = urlparse(url).path.strip("/")
         parts = path.split("/")
         return parts[-1] if parts else hashlib.md5(url.encode()).hexdigest()[:12]
@@ -28,7 +28,7 @@ class CB01Parser:
     def clean_title(raw_title: str) -> tuple[str, int | None, str | None]:
         """Clean raw title string, extracting clean title, year, and quality flag."""
         cleaned = html.unescape(raw_title)
-        # Remove site suffixes
+        # Remove common marketing suffixes
         cleaned = re.sub(r"\s*-\s*FILM GRATIS.*$", "", cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r"\s*Streaming.*$", "", cleaned, flags=re.IGNORECASE)
 
@@ -166,8 +166,8 @@ class CB01Parser:
                     description=description,
                     genres=genres,
                     duration=duration,
-                    cb01_url=movie_url,
-                    catalogs=["cb01"],
+                    source_b_url=movie_url,
+                    catalogs=["crawler"],
                     sources=[],
                 )
             )
@@ -264,8 +264,8 @@ class CB01Parser:
             description=description,
             genres=genres,
             duration=duration,
-            cb01_url=movie_url,
-            catalogs=["cb01"],
+            source_b_url=movie_url,
+            catalogs=["crawler"],
             sources=sources,
             added_at=added_at,
             updated_at=updated_at,
@@ -273,7 +273,7 @@ class CB01Parser:
 
     @classmethod
     def parse_sources(cls, html_text: str, media_id: str) -> list[ProviderSource]:
-        """Extract streaming sources from the cbtable."""
+        """Extract streaming sources from the catalog table."""
         sources: list[ProviderSource] = []
 
         table_match = re.search(
@@ -473,8 +473,8 @@ class CB01Parser:
             poster_url=poster_url,
             description=description,
             genres=genres,
-            cb01_url=series_url,
-            catalogs=["cb01"],
+            source_b_url=series_url,
+            catalogs=["crawler"],
             seasons=seasons_list,
             added_at=added_at,
             updated_at=updated_at,

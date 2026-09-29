@@ -89,7 +89,7 @@ class CatalogMerger:
         text = re.sub(r"\[.*?\]", " ", text)
         text = re.sub(r"\(.*?\)", " ", text)
         text = re.sub(
-            r"\b(streaming|film\s+gratis|serie\s+tv|hd|sd|4k|fhd|ita|subita|sub-ita|completa|by\s+cb01)\b",
+            r"\b(streaming|film\s+gratis|serie\s+tv|hd|sd|4k|fhd|ita|subita|sub-ita|completa)\b",
             " ",
             text,
             flags=re.IGNORECASE,
@@ -192,10 +192,10 @@ class CatalogMerger:
         all_catalogs = list(dict.fromkeys(existing.catalogs + incoming.catalogs))
         existing.catalogs = all_catalogs
 
-        if not existing.cb01_url and incoming.cb01_url:
-            existing.cb01_url = incoming.cb01_url
-        if not existing.streamingcommunity_url and incoming.streamingcommunity_url:
-            existing.streamingcommunity_url = incoming.streamingcommunity_url
+        if not existing.source_a_url and incoming.source_a_url:
+            existing.source_a_url = incoming.source_a_url
+        if not existing.source_b_url and incoming.source_b_url:
+            existing.source_b_url = incoming.source_b_url
 
         if not existing.tmdb_id and incoming.tmdb_id:
             existing.tmdb_id = incoming.tmdb_id
@@ -229,10 +229,10 @@ class CatalogMerger:
         all_catalogs = list(dict.fromkeys(existing.catalogs + incoming.catalogs))
         existing.catalogs = all_catalogs
 
-        if not existing.cb01_url and incoming.cb01_url:
-            existing.cb01_url = incoming.cb01_url
-        if not existing.streamingcommunity_url and incoming.streamingcommunity_url:
-            existing.streamingcommunity_url = incoming.streamingcommunity_url
+        if not existing.source_a_url and incoming.source_a_url:
+            existing.source_a_url = incoming.source_a_url
+        if not existing.source_b_url and incoming.source_b_url:
+            existing.source_b_url = incoming.source_b_url
 
         if not existing.tmdb_id and incoming.tmdb_id:
             existing.tmdb_id = incoming.tmdb_id

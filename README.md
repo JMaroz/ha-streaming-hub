@@ -58,7 +58,7 @@ stream_port: 8099
 | Parametro | Tipo | Predefinito | Descrizione |
 |---|---|---|---|
 | `log_level` | list | `info` | Livello di log dell'app (`trace`, `debug`, `info`, `warning`, `error`). |
-| `custom_sources` | list | `[]` | Array di sorgenti web dell'utente. Il tipo può essere `auto`, `streamingcommunity` o `cb01`. |
+| `custom_sources` | list | `[]` | Array di sorgenti web dell'utente. Il tipo può essere `auto`, `reactive` o `crawler`. |
 | `custom_dns` | list | `cloudflare` | Provider DNS-over-HTTPS (`cloudflare`, `google`, `quad9`, `system`). |
 | `tmdb_api_key` | string | `""` | *(Opzionale)* Chiave API TMDb globale di fallback. |
 | `stream_port` | port | `8099` | Porta proxy HTTP per lo streaming nella rete locale (LAN). |
@@ -107,7 +107,7 @@ flowchart TD
         subgraph App["Streaming Hub App (Container)"]
             UI["Web UI SPA (Ingress Panel)"]
             BE["FastAPI / Uvicorn Server"]
-            Scraper["Catalog Engines (StreamingCommunity, CB01)"]
+            Scraper["Catalog Engines (Reactive SPA, Crawler HTML)"]
             Proxy["HLS Proxy & Rewriter (Port 8099)"]
             DoH["DoH Resolver (Cloudflare / Google / Quad9)"]
         end
@@ -145,15 +145,15 @@ ha-streaming-hub/
     ├── backend/                # Server FastAPI asincrono
     │   ├── main.py             # Router REST e Ingress handler
     │   ├── ha_client.py        # Client Home Assistant Core via SUPERVISOR_TOKEN
-    │   ├── streamingcommunity.py # Scraper e resolver StreamingCommunity
-    │   ├── cb01_client.py      # Scraper e client CB01
-    │   ├── parser.py           # Parser HTML
+    │   ├── engine_reactive.py  # Client e resolver per motori reattivi SPA
+    │   ├── engine_crawler.py   # Client per motori crawler HTML
+    │   ├── crawler_parser.py   # Parser HTML per cataloghi semantici
     │   ├── proxy.py            # Proxy HLS e riscrittura playlist M3U8
     │   ├── dns_resolver.py     # Resolver DNS-over-HTTPS (DoH)
     │   ├── metadata.py         # Arricchitore TMDb / Cinemeta
     │   ├── models.py           # Modelli Movie, TvSeries, Episode, Source
     │   ├── utils.py            # Deduplicazione e unificazione cataloghi
-    │   └── providers/          # Adapter per provider video (SC, Maxstream, Mixdrop)
+    │   └── providers/          # Adapter per provider video (Reactive, Maxstream, Mixdrop)
     └── frontend/               # Single Page Application
         ├── index.html          # Interfaccia grafica principale
         ├── css/style.css       # Stili cinematici dark mode con glassmorphism

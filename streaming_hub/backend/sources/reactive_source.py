@@ -1,19 +1,18 @@
-"""StreamingCommunity catalog and stream source adapter."""
+"""Reactive catalog and stream source adapter."""
 
 from __future__ import annotations
 
 import logging
-from typing import Any
 
-from ..models import Movie, ProviderSource, ResolvedMedia, TvEpisode, TvSeason, TvSeries
-from ..streamingcommunity import StreamingCommunityClient
+from ..engine_reactive import ReactiveStreamClient
+from ..models import Movie, ProviderSource, ResolvedMedia, TvSeason, TvSeries
 from .base import BaseSource
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class StreamingCommunitySource(BaseSource):
-    """Source adapter for StreamingCommunity."""
+class ReactiveSource(BaseSource):
+    """Source adapter for reactive SPA streaming catalogs."""
 
     def __init__(
         self,
@@ -22,12 +21,12 @@ class StreamingCommunitySource(BaseSource):
         enabled: bool = True,
         name: str | None = None,
     ) -> None:
-        """Initialize StreamingCommunity source."""
+        """Initialize reactive source."""
         self._enabled = enabled
         self._base_url = base_url
-        self._name = name or "StreamingCommunity"
+        self._name = name or "Sorgente Reattiva"
         self._client = (
-            StreamingCommunityClient(base_url=base_url, custom_dns=custom_dns)
+            ReactiveStreamClient(base_url=base_url, custom_dns=custom_dns)
             if enabled and base_url
             else None
         )
@@ -35,7 +34,7 @@ class StreamingCommunitySource(BaseSource):
     @property
     def source_id(self) -> str:
         """Source identifier."""
-        return "streamingcommunity"
+        return "reactive"
 
     @property
     def display_name(self) -> str:
@@ -81,34 +80,29 @@ class StreamingCommunitySource(BaseSource):
         for item in items:
             if self.source_id not in item.catalogs:
                 item.catalogs.append(self.source_id)
-            if media_type == "movie" and isinstance(item, Movie):
-                filtered.append(item)
-            elif media_type == "tv" and isinstance(item, TvSeries):
-                filtered.append(item)
-            elif media_type == "all":
+            if (media_type == "movie" and isinstance(item, Movie)) or (media_type == "tv" and isinstance(item, TvSeries)) or media_type == "all":
                 filtered.append(item)
         return filtered
 
     async def get_details(self, media_type: str, item_id: str) -> Movie | TvSeries:
         """Fetch complete title details."""
         if not self.is_enabled:
-            raise ValueError("StreamingCommunity source is disabled")
+            raise ValueError("Reactive source is disabled")
 
         if media_type in ("tv", "series"):
             series = await self._client.get_tv_series(item_id)
             if self.source_id not in series.catalogs:
                 series.catalogs.append(self.source_id)
             return series
-        else:
-            movie = await self._client.get_movie(item_id)
-            if self.source_id not in movie.catalogs:
-                movie.catalogs.append(self.source_id)
-            return movie
+        movie = await self._client.get_movie(item_id)
+        if self.source_id not in movie.catalogs:
+            movie.catalogs.append(self.source_id)
+        return movie
 
     async def get_season(self, series_id: str, season_number: int) -> TvSeason:
         """Fetch season episodes."""
         if not self.is_enabled:
-            raise ValueError("StreamingCommunity source is disabled")
+            raise ValueError("Reactive source is disabled")
 
         clean_id = series_id.replace("sc-", "")
         parts = clean_id.split("-", 1)
@@ -123,11 +117,11 @@ class StreamingCommunitySource(BaseSource):
     ) -> ResolvedMedia:
         """Resolve watch URL to playable HLS m3u8 playlist."""
         if not self.is_enabled:
-            raise ValueError("StreamingCommunity source is disabled")
+            raise ValueError("Reactive source is disabled")
 
         m3u8_url, headers = await self._client.resolve_stream(source.page_url, prefer_fhd=prefer_fhd)
         if not m3u8_url:
-            raise ValueError("Could not resolve stream URL for StreamingCommunity")
+            raise ValueError("Could not resolve stream URL for reactive source")
 
         return ResolvedMedia(
             url=m3u8_url,

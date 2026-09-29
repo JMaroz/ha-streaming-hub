@@ -32,7 +32,7 @@ schema:
   log_level: list(trace|debug|info|notice|warning|error|fatal)
   custom_sources:
     - url: url
-      type: list(auto|streamingcommunity|cb01)?
+      type: list(auto|reactive|crawler)?
       name: str?
   custom_dns: list(cloudflare|google|quad9|system)
   stream_port: port

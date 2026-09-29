@@ -10,7 +10,7 @@
   - Replaced technical entity identifiers (such as `media_player.tpm191e`) in toast alerts and device selectors with formatted friendly names (e.g. `Philips Smart TV (TPM191E)`).
   - Toast notifications updated to friendly messages: `Avvio riproduzione su <Dispositivo>...` and `In riproduzione su <Dispositivo>!`.
 - **Genre Catalog Search & Cross-Catalog Merging**:
-  - Implemented `get_movies_by_genre` on `CB01Client` and `get_by_genre` on `StreamingCommunityClient`.
+  - Implemented `get_movies_by_genre` and `get_by_genre` across catalog engine adapters.
   - Added SQLite title cache lookup (`get_titles_by_genre`) to merge locally stored titles with live scraper results for fast, reliable genre browsing for both movies and TV series.
 - **Mobile App Background/Standby Recovery**:
   - Added lifecycle listeners (`visibilitychange`, `pageshow`, and `focus`) to detect when the Home Assistant Mobile App or browser tab wakes up from standby.

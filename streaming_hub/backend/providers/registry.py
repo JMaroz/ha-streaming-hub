@@ -11,7 +11,7 @@ from ..models import ProviderSource, ResolvedMedia
 from .base import StreamingProvider
 from .maxstream import MaxstreamProvider
 from .mixdrop import MixdropProvider
-from .streamingcommunity import StreamingCommunityProvider
+from .reactive_provider import ReactiveStreamProvider
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -19,10 +19,10 @@ _LOGGER = logging.getLogger(__name__)
 class ProviderRegistry:
     """Registry managing streaming providers and resolution order."""
 
-    def __init__(self, sc_client=None) -> None:
+    def __init__(self, reactive_client=None) -> None:
         """Initialize provider registry with default adapters."""
         self._providers: dict[str, StreamingProvider] = {}
-        self.register(StreamingCommunityProvider(client=sc_client))
+        self.register(ReactiveStreamProvider(client=reactive_client))
         self.register(MaxstreamProvider())
         self.register(MixdropProvider())
 
@@ -51,7 +51,7 @@ class ProviderRegistry:
             pref_score = 0
             if preferred != "automatic" and s.provider_id == preferred:
                 pref_score = 2
-            elif s.provider_id == "streamingcommunity":
+            elif s.provider_id in ("reactive", "streamingcommunity"):
                 pref_score = 1
 
             quality_order = {"4k": 4, "fhd": 3, "hd": 2, "sd": 1}

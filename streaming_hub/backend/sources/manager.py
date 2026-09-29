@@ -14,7 +14,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class SourceManager:
-    """Manages all registered streaming sources (StreamingCommunity, CB01, etc.).
+    """Manages all registered streaming sources (reactive, crawler, etc.).
 
     Coordinates concurrent queries, translates all results into the common
     Streaming Hub data models, and unifies duplicates across providers.
@@ -150,7 +150,7 @@ class SourceManager:
         for source_id, src in self._sources.items():
             if not src.is_enabled:
                 continue
-            if item_id.startswith(f"{source_id}-") or (source_id == "streamingcommunity" and item_id.startswith("sc-")):
+            if item_id.startswith(f"{source_id}-") or (source_id in ("reactive", "streamingcommunity") and item_id.startswith("sc-")):
                 return await src.get_details(media_type, item_id)
 
         # Fallback: query enabled sources until found
@@ -167,7 +167,7 @@ class SourceManager:
         for source_id, src in self._sources.items():
             if not src.is_enabled:
                 continue
-            if series_id.startswith(f"{source_id}-") or (source_id == "streamingcommunity" and series_id.startswith("sc-")):
+            if series_id.startswith(f"{source_id}-") or (source_id in ("reactive", "streamingcommunity") and series_id.startswith("sc-")):
                 return await src.get_season(series_id, season_number)
 
         for src in self.get_enabled_sources():

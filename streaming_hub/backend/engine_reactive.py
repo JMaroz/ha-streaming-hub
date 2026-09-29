@@ -1,4 +1,4 @@
-"""Async HTTP and API client for StreamingCommunity catalog and streams."""
+"""Async HTTP and API client for reactive SPA catalog and streams."""
 
 from __future__ import annotations
 
@@ -16,13 +16,13 @@ import aiohttp
 
 from .dns_resolver import DNS_DEFAULT, DoHResolver
 from .models import Movie, ProviderSource, TvEpisode, TvSeason, TvSeries
-from .parser import CB01Parser
+from .crawler_parser import CrawlerCatalogParser
 from .utils import genre_matches
 
 _LOGGER = logging.getLogger(__name__)
 
-CATALOG_STREAMINGCOMMUNITY = "streamingcommunity"
-PROVIDER_STREAMINGCOMMUNITY = "streamingcommunity"
+CATALOG_REACTIVE = "reactive"
+PROVIDER_REACTIVE = "reactive"
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -31,8 +31,8 @@ USER_AGENT = (
 )
 
 
-class StreamingCommunityClient:
-    """Asynchronous client for interacting with StreamingCommunity."""
+class ReactiveStreamClient:
+    """Asynchronous client for interacting with ReactiveEngine."""
 
     def __init__(
         self,
@@ -40,7 +40,7 @@ class StreamingCommunityClient:
         custom_dns: str = DNS_DEFAULT,
         session: aiohttp.ClientSession | None = None,
     ) -> None:
-        """Initialize the StreamingCommunity client with user-specified base URL."""
+        """Initialize the reactive stream client with user-specified base URL."""
         self.base_url = (base_url or "").rstrip("/") + "/"
         self.custom_dns = custom_dns
         self._session = session
@@ -117,10 +117,10 @@ class StreamingCommunityClient:
                                 req_headers["X-Inertia-Version"] = ver
                             async with session.post(url, headers=req_headers, json=data, allow_redirects=True) as r2:
                                 if r2.status != 200:
-                                    raise ValueError(f"StreamingCommunity status {r2.status} for {url}")
+                                    raise ValueError(f"Reactive stream status {r2.status} for {url}")
                                 return await r2.text()
                         if resp.status != 200:
-                            raise ValueError(f"StreamingCommunity returned status {resp.status} for URL {url}")
+                            raise ValueError(f"Reactive stream returned status {resp.status} for URL {url}")
                         return await resp.text()
                 else:
                     async with session.get(url, headers=req_headers, allow_redirects=True) as resp:
@@ -131,10 +131,10 @@ class StreamingCommunityClient:
                                 req_headers["X-Inertia-Version"] = ver
                             async with session.get(url, headers=req_headers, allow_redirects=True) as r2:
                                 if r2.status != 200:
-                                    raise ValueError(f"StreamingCommunity status {r2.status} for {url}")
+                                    raise ValueError(f"Reactive stream status {r2.status} for {url}")
                                 return await r2.text()
                         if resp.status != 200:
-                            raise ValueError(f"StreamingCommunity returned status {resp.status} for URL {url}")
+                            raise ValueError(f"Reactive stream returned status {resp.status} for URL {url}")
                         return await resp.text()
         except TimeoutError as err:
             raise ValueError(f"Timeout requesting {url}") from err
@@ -272,7 +272,7 @@ class StreamingCommunityClient:
         return names
 
     def _item_to_movie(self, item: dict[str, Any]) -> Movie:
-        """Convert a StreamingCommunity search or title dict into a Movie object."""
+        """Convert a ReactiveEngine search or title dict into a Movie object."""
         sc_id = str(item.get("id"))
         slug = item.get("slug", "")
         name = item.get("name", "")
@@ -293,7 +293,7 @@ class StreamingCommunityClient:
 
         genres = self._extract_genre_names(item)
         media_type = item.get("type", "movie")
-        if media_type == "tv" or item.get("seasons") or CB01Parser.is_tv_item(name, genres=genres):
+        if media_type == "tv" or item.get("seasons") or CrawlerCatalogParser.is_tv_item(name, genres=genres):
             genres.append("serie tv")
 
         raw_cast = item.get("actors") or item.get("cast") or []
@@ -325,8 +325,8 @@ class StreamingCommunityClient:
         source = ProviderSource(
             id=f"sc-movie-{sc_id}",
             media_id=f"sc-{sc_id}",
-            provider_id=PROVIDER_STREAMINGCOMMUNITY,
-            provider_name="StreamingCommunity",
+            provider_id=PROVIDER_REACTIVE,
+            provider_name="Reactive",
             page_url=watch_url,
             language="ita",
             quality="1080p FHD",
@@ -354,16 +354,16 @@ class StreamingCommunityClient:
             certification=certification,
             cast=cast_list,
             director=director_name,
-            streamingcommunity_url=sc_url,
+            source_a_url=sc_url,
             tmdb_id=item.get("tmdb_id"),
             imdb_id=item.get("imdb_id"),
-            catalogs=[CATALOG_STREAMINGCOMMUNITY],
+            catalogs=[CATALOG_REACTIVE],
             sources=[source],
             added_at=datetime.now(UTC),
         )
 
     def _item_to_tv_series(self, item: dict[str, Any]) -> TvSeries:
-        """Convert a StreamingCommunity search or title dict into a TvSeries object."""
+        """Convert a ReactiveEngine search or title dict into a TvSeries object."""
         sc_id = str(item.get("id"))
         slug = item.get("slug", "")
         name = item.get("name", "")
@@ -437,10 +437,10 @@ class StreamingCommunityClient:
             certification=certification,
             cast=cast_list,
             director=director_name,
-            streamingcommunity_url=sc_url,
+            source_a_url=sc_url,
             tmdb_id=item.get("tmdb_id"),
             imdb_id=item.get("imdb_id"),
-            catalogs=[CATALOG_STREAMINGCOMMUNITY],
+            catalogs=[CATALOG_REACTIVE],
             seasons=seasons,
             added_at=datetime.now(UTC),
         )
@@ -701,7 +701,7 @@ class StreamingCommunityClient:
     }
 
     def resolve_genre_id(self, genre: str) -> int | None:
-        """Resolve genre name or slug to StreamingCommunity numerical genre ID."""
+        """Resolve genre name or slug to ReactiveEngine numerical genre ID."""
         clean = genre.strip().lower()
         if clean in self.GENRE_ID_MAP:
             return self.GENRE_ID_MAP[clean]
@@ -844,8 +844,8 @@ class StreamingCommunityClient:
             source = ProviderSource(
                 id=f"sc-ep-{ep_id}",
                 media_id=f"sc-{sc_id}_s{season_num}e{ep_num}",
-                provider_id=PROVIDER_STREAMINGCOMMUNITY,
-                provider_name="StreamingCommunity",
+                provider_id=PROVIDER_REACTIVE,
+                provider_name="Reactive",
                 page_url=watch_url,
                 language="ita",
                 quality="1080p FHD",
@@ -989,7 +989,7 @@ class StreamingCommunityClient:
         watch_url: str,
         prefer_fhd: bool = True,
     ) -> tuple[str, dict[str, str]]:
-        """Resolve a StreamingCommunity watch URL to an HLS .m3u8 playlist URL and required headers."""
+        """Resolve a ReactiveEngine watch URL to an HLS .m3u8 playlist URL and required headers."""
         current_url = watch_url
         # If this is an episode watch URL, transform to iframe directly to avoid Inertia SSR defaulting to S01E01
         if "episode_id=" in current_url and "/it/watch/" in current_url:

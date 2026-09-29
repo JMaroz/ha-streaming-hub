@@ -1,9 +1,8 @@
-"""Source Detector: auto-detects and fingerprints streaming provider types from URLs."""
+"""Source Detector: auto-detects and fingerprints streaming engine types from URLs."""
 
 from __future__ import annotations
 
 import logging
-import re
 from urllib.parse import urlparse
 
 import aiohttp
@@ -16,14 +15,18 @@ USER_AGENT = (
     "Chrome/124.0.0.0 Safari/537.36"
 )
 
+# Internal heuristic keyword patterns
+_REACTIVE_KEYWORDS = ("community", "strcom", "sc-", "vix")
+_CRAWLER_KEYWORDS = ("cineblog", "cb01", "film-streaming")
+
 
 class SourceDetector:
     """Detects and fingerprints the streaming engine/provider from a given base URL.
 
     Supports:
-    - Explicit type definition ('streamingcommunity', 'cb01')
-    - URL heuristics (matching known domain or path keywords)
-    - Active HTTP fingerprinting (probing HTML markup, headers, and inertia tags)
+    - Explicit type definition ('reactive', 'crawler')
+    - URL heuristics (matching known domain or path structure)
+    - Active HTTP fingerprinting (probing HTML markup, headers, and SPA tags)
     """
 
     @classmethod
@@ -32,13 +35,13 @@ class SourceDetector:
         parsed = urlparse(url)
         domain = (parsed.netloc or parsed.path).lower()
 
-        # StreamingCommunity patterns
-        if any(keyword in domain for keyword in ("streamingcommunity", "community", "sc-", "strcom")):
-            return "streamingcommunity"
+        # Reactive engine patterns
+        if any(keyword in domain for keyword in _REACTIVE_KEYWORDS):
+            return "reactive"
 
-        # CB01 patterns
-        if any(keyword in domain for keyword in ("cb01", "cineblog", "cineblog01")):
-            return "cb01"
+        # Crawler engine patterns
+        if any(keyword in domain for keyword in _CRAWLER_KEYWORDS):
+            return "crawler"
 
         return None
 
@@ -46,7 +49,7 @@ class SourceDetector:
     async def detect_by_probe(cls, url: str, session: aiohttp.ClientSession | None = None) -> str | None:
         """Actively probe the URL via HTTP GET and inspect response HTML and headers.
 
-        This allows detecting arbitrary or new mirrors whose domain names don't match heuristics.
+        Allows detecting arbitrary or new mirrors whose domain names don't match heuristics.
         """
         headers = {
             "User-Agent": USER_AGENT,
@@ -71,29 +74,29 @@ class SourceDetector:
                     _LOGGER.warning("Probe to %s returned HTTP %s", clean_url, resp.status)
                     return None
 
-                # Check headers
+                # Check headers for reactive SPA marker
                 if "x-inertia" in resp.headers:
-                    return "streamingcommunity"
+                    return "reactive"
 
                 html = await resp.text(errors="ignore")
 
-                # Check for StreamingCommunity markers (Inertia.js app root, props, or API scripts)
+                # Check for reactive SPA markers (app root, props, or API scripts)
                 if 'id="app"' in html and 'data-page="' in html:
-                    return "streamingcommunity"
+                    return "reactive"
                 if "window.props" in html or "inertia" in html.lower():
-                    if "streaming" in html.lower() or "vixcloud" in html.lower():
-                        return "streamingcommunity"
+                    if "streaming" in html.lower() or "vixcloud" in html.lower() or "vixsrc" in html.lower():
+                        return "reactive"
 
-                # Check for CB01 markers (WordPress templates, card-video, sp-head, film-streaming)
+                # Check for crawler markers (post cards, video headers, category templates)
                 if (
                     "card-video" in html
                     or "sp-head" in html
                     or "/film-streaming/" in html
                     or "/serietv/" in html
-                    or "wp-content" in html
-                    and "cineblog" in html.lower()
+                    or "mp-post" in html
+                    or "cbtable" in html
                 ):
-                    return "cb01"
+                    return "crawler"
 
         except Exception as err:
             _LOGGER.debug("HTTP fingerprint probe failed for %s: %s", clean_url, err)
@@ -112,15 +115,15 @@ class SourceDetector:
     ) -> str:
         """Determine provider type given a URL and optional user override.
 
-        Returns one of: 'streamingcommunity', 'cb01', or 'unknown'.
+        Returns one of: 'reactive', 'crawler', or 'unknown'.
         """
         user_type = (user_specified_type or "auto").strip().lower()
 
-        # 1. Explicit user selection
-        if user_type in ("streamingcommunity", "sc"):
-            return "streamingcommunity"
-        if user_type in ("cb01", "cineblog"):
-            return "cb01"
+        # 1. Explicit user selection (including silent backward compatibility)
+        if user_type in ("reactive", "spa", "engine_alpha", "type_a", "streamingcommunity", "sc"):
+            return "reactive"
+        if user_type in ("crawler", "html", "engine_beta", "type_b", "cb01", "cineblog"):
+            return "crawler"
 
         # 2. Fast domain heuristic
         heuristic = cls.detect_by_heuristic(url)

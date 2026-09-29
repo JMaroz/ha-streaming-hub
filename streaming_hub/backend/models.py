@@ -70,8 +70,8 @@ class Movie:
     cast: list[str] = field(default_factory=list)
     director: str | None = None
 
-    cb01_url: str = ""
-    streamingcommunity_url: str = ""
+    source_a_url: str = ""
+    source_b_url: str = ""
     tmdb_id: int | None = None
     imdb_id: str | None = None
     trakt_id: int | None = None
@@ -82,6 +82,22 @@ class Movie:
 
     added_at: datetime | None = None
     updated_at: datetime | None = None
+
+    @property
+    def streamingcommunity_url(self) -> str:
+        return self.source_a_url
+
+    @streamingcommunity_url.setter
+    def streamingcommunity_url(self, val: str) -> None:
+        self.source_a_url = val
+
+    @property
+    def cb01_url(self) -> str:
+        return self.source_b_url
+
+    @cb01_url.setter
+    def cb01_url(self, val: str) -> None:
+        self.source_b_url = val
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -100,8 +116,8 @@ class Movie:
             "certification": self.certification,
             "cast": self.cast,
             "director": self.director,
-            "cb01_url": self.cb01_url,
-            "streamingcommunity_url": self.streamingcommunity_url,
+            "source_a_url": self.source_a_url,
+            "source_b_url": self.source_b_url,
             "tmdb_id": self.tmdb_id,
             "imdb_id": self.imdb_id,
             "trakt_id": self.trakt_id,
@@ -131,8 +147,8 @@ class Movie:
             certification=data.get("certification"),
             cast=data.get("cast", []),
             director=data.get("director"),
-            cb01_url=data.get("cb01_url", ""),
-            streamingcommunity_url=data.get("streamingcommunity_url", ""),
+            source_a_url=data.get("source_a_url") or data.get("streamingcommunity_url", ""),
+            source_b_url=data.get("source_b_url") or data.get("cb01_url", ""),
             tmdb_id=data.get("tmdb_id"),
             imdb_id=data.get("imdb_id"),
             trakt_id=data.get("trakt_id"),
@@ -220,8 +236,8 @@ class TvSeries:
     cast: list[str] = field(default_factory=list)
     director: str | None = None
 
-    cb01_url: str = ""
-    streamingcommunity_url: str = ""
+    source_a_url: str = ""
+    source_b_url: str = ""
     tmdb_id: int | None = None
     imdb_id: str | None = None
     trakt_id: int | None = None
@@ -232,6 +248,22 @@ class TvSeries:
 
     added_at: datetime | None = None
     updated_at: datetime | None = None
+
+    @property
+    def streamingcommunity_url(self) -> str:
+        return self.source_a_url
+
+    @streamingcommunity_url.setter
+    def streamingcommunity_url(self, val: str) -> None:
+        self.source_a_url = val
+
+    @property
+    def cb01_url(self) -> str:
+        return self.source_b_url
+
+    @cb01_url.setter
+    def cb01_url(self, val: str) -> None:
+        self.source_b_url = val
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -249,8 +281,8 @@ class TvSeries:
             "certification": self.certification,
             "cast": self.cast,
             "director": self.director,
-            "cb01_url": self.cb01_url,
-            "streamingcommunity_url": self.streamingcommunity_url,
+            "source_a_url": self.source_a_url,
+            "source_b_url": self.source_b_url,
             "tmdb_id": self.tmdb_id,
             "imdb_id": self.imdb_id,
             "trakt_id": self.trakt_id,
@@ -278,8 +310,8 @@ class TvSeries:
             certification=data.get("certification"),
             cast=data.get("cast", []),
             director=data.get("director"),
-            cb01_url=data.get("cb01_url", ""),
-            streamingcommunity_url=data.get("streamingcommunity_url", ""),
+            source_a_url=data.get("source_a_url") or data.get("streamingcommunity_url", ""),
+            source_b_url=data.get("source_b_url") or data.get("cb01_url", ""),
             tmdb_id=data.get("tmdb_id"),
             imdb_id=data.get("imdb_id"),
             trakt_id=data.get("trakt_id"),

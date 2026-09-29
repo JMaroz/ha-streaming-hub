@@ -901,10 +901,10 @@
         catalogsList = item.catalogs;
       } else if (item.sources && item.sources.length > 0) {
         catalogsList = [...new Set(item.sources.map((s) => s.provider_id || s.provider_name))];
-      } else if (item.id && item.id.startsWith("sc-")) {
-        catalogsList = ["streamingcommunity"];
-      } else if (item.id && (item.id.startsWith("cb-") || item.cb01_url)) {
-        catalogsList = ["cb01"];
+      } else if (item.source_a_url || (item.id && item.id.startsWith("sc-"))) {
+        catalogsList = ["reactive"];
+      } else if (item.source_b_url || (item.id && item.id.startsWith("cb-"))) {
+        catalogsList = ["crawler"];
       }
 
       let catalogsHtml = "";
@@ -916,12 +916,23 @@
                 const lower = cat.toLowerCase();
                 let badgeClass = "catalog-badge";
                 let display = cat;
-                if (lower.includes("streamingcommunity") || lower === "sc") {
-                  badgeClass += " badge-streamingcommunity";
-                  display = "SC";
-                } else if (lower.includes("cb01") || lower === "cb") {
-                  badgeClass += " badge-cb01";
-                  display = "CB01";
+
+                const matchedSource = (state.availableSources || []).find(
+                  (s) => s.id.toLowerCase() === lower || (s.name && s.name.toLowerCase() === lower)
+                );
+
+                if (matchedSource && matchedSource.name) {
+                  display = matchedSource.name;
+                  badgeClass += ` badge-source-${matchedSource.id.toLowerCase()}`;
+                } else if (lower.includes("reactive")) {
+                  badgeClass += " badge-source-reactive";
+                  display = "Reattiva";
+                } else if (lower.includes("crawler")) {
+                  badgeClass += " badge-source-crawler";
+                  display = "Web";
+                } else {
+                  badgeClass += " badge-source-generic";
+                  display = cat;
                 }
                 return `<span class="${badgeClass}">${escapeHtml(display)}</span>`;
               })

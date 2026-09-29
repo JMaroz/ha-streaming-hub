@@ -14,20 +14,20 @@ _LOGGER = logging.getLogger(__name__)
 class BaseSource(ABC):
     """Abstract base class defining the contract for any catalog source.
 
-    Every supported or future website/provider (StreamingCommunity, CB01, etc.)
-    implements this interface, transforming site-specific structures into the
+    Every supported streaming engine adapter (reactive, crawler, etc.)
+    implements this interface, transforming engine-specific structures into the
     unified Streaming Hub data models.
     """
 
     @property
     @abstractmethod
     def source_id(self) -> str:
-        """Unique machine identifier for this source (e.g., 'streamingcommunity', 'cb01')."""
+        """Unique machine identifier for this source (e.g., 'reactive', 'crawler')."""
 
     @property
     @abstractmethod
     def display_name(self) -> str:
-        """Human-readable display name (e.g., 'StreamingCommunity', 'CB01')."""
+        """Human-readable display name (e.g., 'Sorgente Reattiva', 'Sorgente Web')."""
 
     @property
     def icon(self) -> str:
