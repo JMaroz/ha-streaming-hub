@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+import asyncio
+import argparse
+import sys
+import logging
+from pathlib import Path
+
+# Add project root to path so we can import streaming_hub
+sys.path.insert(0, str(Path(__file__).parent.parent.absolute()))
+
+import aiohttp
+from aiohttp import ClientSession, ClientTimeout
+from streaming_hub.backend.engine_reactive import ReactiveStreamClient, USER_AGENT
+from streaming_hub.backend.utils import configure_dns
+import urllib.parse
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+_LOGGER = logging.getLogger(__name__)
+
+async def run_diagnostics(media_id_or_url: str, custom_base: str | None = None):
+    _LOGGER.info(f"Starting playback debugger for: {media_id_or_url}")
+    
+    # Check if URL
+    if media_id_or_url.startswith("http"):
+        watch_url = media_id_or_url
+    else:
+        # Assuming ID format e.g. "sc-1234" or "1234"
+        clean_id = str(media_id_or_url).replace("sc-", "")
+        clean_id = clean_id.split("-")[0]
+        base = (custom_base or "https://streamingcommunity.computer").rstrip("/")
+        watch_url = f"{base}/it/watch/{clean_id}"
+        _LOGGER.info(f"Converted ID to URL: {watch_url}")
+
+    resolver = configure_dns()
+    conn = aiohttp.TCPConnector(resolver=resolver) if resolver else None
+
+    async with ClientSession(connector=conn) as session:
+        client = ReactiveStreamClient(session)
+        
+        # Step 1: Reachability
+        _LOGGER.info("\n--- STEP 1: DNS & Reachability ---")
+        try:
+            domain = urllib.parse.urlsplit(watch_url).netloc
+            async with session.get(f"https://{domain}/", timeout=ClientTimeout(total=10)) as resp:
+                _LOGGER.info(f"✅ Domain {domain} is reachable. HTTP {resp.status}")
+        except Exception as e:
+            _LOGGER.error(f"❌ Cannot reach domain {domain}: {e}")
+            _LOGGER.error("Causa Nota: Il dominio potrebbe essere stato bloccato a livello DNS o non esiste più.")
+            return
+
+        # Step 2: Stream Resolution
+        _LOGGER.info("\n--- STEP 2: Stream Resolution & Token Extraction ---")
+        try:
+            m3u8_url, stream_headers = await client.resolve_stream(watch_url, prefer_fhd=True)
+            _LOGGER.info(f"✅ Successfully extracted master playlist URL:\n{m3u8_url}")
+            _LOGGER.info(f"✅ Headers: {stream_headers}")
+        except Exception as e:
+            _LOGGER.error(f"❌ Failed to extract master playlist: {e}")
+            _LOGGER.error("Causa Possibile: Il provider upstream ha cambiato la struttura HTML/JS, oppure l'iframe non è più presente nella pagina.")
+            return
+
+        # Step 3: Fetch Master Playlist
+        _LOGGER.info("\n--- STEP 3: Fetch Master Playlist (.m3u8) ---")
+        try:
+            async with session.get(m3u8_url, headers=stream_headers, timeout=ClientTimeout(total=15)) as resp:
+                if resp.status == 200:
+                    _LOGGER.info(f"✅ Master playlist fetched successfully (HTTP 200).")
+                    master_text = await resp.text()
+                else:
+                    _LOGGER.error(f"❌ Master playlist fetch failed: HTTP {resp.status}")
+                    if resp.status == 403:
+                        _LOGGER.error("Causa Nota: Token scaduto, firma non valida, o `h=1` mancante (Forbidden).")
+                    return
+        except Exception as e:
+            _LOGGER.error(f"❌ Connection error fetching master playlist: {e}")
+            return
+
+        # Parse master playlist for the best stream
+        segment_playlist_url = None
+        for line in master_text.splitlines():
+            if not line.startswith("#") and ".m3u8" in line:
+                segment_playlist_url = urllib.parse.urljoin(m3u8_url, line.strip())
+                break
+
+        if not segment_playlist_url:
+            _LOGGER.error("❌ No segment playlist found inside master playlist.")
+            return
+        
+        _LOGGER.info(f"✅ Found segment playlist: {segment_playlist_url}")
+
+        # Step 4: Fetch Segment Playlist & Key
+        _LOGGER.info("\n--- STEP 4: Fetch Segment Playlist & Key Probe ---")
+        try:
+            async with session.get(segment_playlist_url, headers=stream_headers, timeout=ClientTimeout(total=15)) as resp:
+                if resp.status == 200:
+                    _LOGGER.info(f"✅ Segment playlist fetched successfully (HTTP 200).")
+                    segment_text = await resp.text()
+                else:
+                    _LOGGER.error(f"❌ Segment playlist fetch failed: HTTP {resp.status}")
+                    return
+        except Exception as e:
+            _LOGGER.error(f"❌ Connection error fetching segment playlist: {e}")
+            return
+
+        # Check for AES key
+        key_url = None
+        for line in segment_text.splitlines():
+            if line.startswith("#EXT-X-KEY"):
+                # Extract URI
+                if 'URI="' in line:
+                    uri_part = line.split('URI="')[1].split('"')[0]
+                    key_url = urllib.parse.urljoin(segment_playlist_url, uri_part)
+                break
+
+        if key_url:
+            _LOGGER.info(f"Found AES Encryption Key URL: {key_url}")
+            try:
+                # ExoPlayer often makes HEAD requests to the key, or GETs it directly. Let's GET it.
+                async with session.get(key_url, headers=stream_headers, timeout=ClientTimeout(total=15)) as resp:
+                    if resp.status == 200:
+                        _LOGGER.info(f"✅ AES Key fetched successfully (HTTP 200).")
+                    else:
+                        _LOGGER.error(f"❌ AES Key fetch failed: HTTP {resp.status}")
+                        if resp.status == 403:
+                            _LOGGER.error("Causa Nota: Il provider upstream blocca il download della chiave (es. Referer mancante o CORS). Chromecast fallirà qui.")
+                        return
+            except Exception as e:
+                _LOGGER.error(f"❌ Error fetching AES key: {e}")
+                return
+        else:
+            _LOGGER.info("No AES Encryption Key found (Cleartext stream).")
+
+        # Step 5: Fetch First Video Segment
+        _LOGGER.info("\n--- STEP 5: Probe Video Segment (HEAD / GET) ---")
+        segment_url = None
+        for line in segment_text.splitlines():
+            if not line.startswith("#") and line.strip():
+                segment_url = urllib.parse.urljoin(segment_playlist_url, line.strip())
+                break
+
+        if segment_url:
+            _LOGGER.info(f"Found First Segment URL: {segment_url}")
+            try:
+                # 1. HEAD Probe (used by cast)
+                async with session.head(segment_url, headers=stream_headers, timeout=ClientTimeout(total=15)) as resp:
+                    if resp.status in (200, 206):
+                        _LOGGER.info(f"✅ Segment HEAD probe successful (HTTP {resp.status}).")
+                    else:
+                        _LOGGER.error(f"❌ Segment HEAD probe failed: HTTP {resp.status}")
+                
+                # 2. GET Probe
+                async with session.get(segment_url, headers=stream_headers, timeout=ClientTimeout(total=15)) as resp:
+                    if resp.status in (200, 206):
+                        _LOGGER.info(f"✅ Segment GET probe successful (HTTP {resp.status}).")
+                        chunk = await resp.content.read(1024)
+                        if len(chunk) > 0:
+                            _LOGGER.info("✅ Successfully read 1024 bytes of segment data.")
+                    else:
+                        _LOGGER.error(f"❌ Segment GET probe failed: HTTP {resp.status}")
+            except Exception as e:
+                _LOGGER.error(f"❌ Error probing segment: {e}")
+                return
+
+        _LOGGER.info("\n🎯 DIAGNOSTICS COMPLETE. Playback should be working perfectly.")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Streaming Hub Playback Debugger")
+    parser.add_argument("url", help="URL o ID del contenuto da testare (es. URL watch o ID numerico)")
+    parser.add_argument("--base-url", help="URL base opzionale per convertire ID in watch URL", default=None)
+    args = parser.parse_args()
+    
+    try:
+        asyncio.run(run_diagnostics(args.url, custom_base=args.base_url))
+    except KeyboardInterrupt:
+        print("\nProcess interrupted.")
+        sys.exit(0)

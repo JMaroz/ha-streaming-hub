@@ -221,7 +221,7 @@ class ReactiveStreamClient:
         raw_params = master_playlist.get("params") or {}
         params: dict[str, str] = {str(k): str(v) for k, v in raw_params.items() if v is not None and v != ""}
 
-        if can_play_fhd and prefer_fhd:
+        if can_play_fhd:
             params["h"] = "1"
 
         parts = urlsplit(base_url)
@@ -1039,6 +1039,7 @@ class ReactiveStreamClient:
             current_url = next_url
 
         if not vix_html:
+            _LOGGER.error("Causa Nota: Impossibile trovare l'iframe del player. Il provider di streaming potrebbe aver cambiato la struttura HTML/JS o l'IP di Home Assistant e' bloccato.")
             raise ValueError(f"Could not locate player iframe with masterPlaylist on {watch_url}")
 
         can_play_fhd = self.extract_bool(vix_html, "canPlayFHD")
@@ -1076,7 +1077,7 @@ class ReactiveStreamClient:
                     params = json.loads(raw_params_str)
 
             params_dict = {str(k): str(v) for k, v in params.items() if v}
-            if can_play_fhd and prefer_fhd:
+            if can_play_fhd:
                 params_dict["h"] = "1"
 
             parts = urlsplit(base_playlist_url)

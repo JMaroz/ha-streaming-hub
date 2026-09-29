@@ -174,6 +174,13 @@ class StreamProxy:
                 timeout=aiohttp.ClientTimeout(total=15),
             ) as upstream:
                 if upstream.status >= 400:
+                    if upstream.status == 403:
+                        _LOGGER.error("Stream access denied (403) by CDN/Upstream for %s. Causa Nota: Token scaduto, firma non valida o parametro h=1 mancante.", actual_url)
+                    elif upstream.status == 404:
+                        _LOGGER.error("Stream not found (404) by CDN/Upstream for %s. Causa Nota: Il contenuto potrebbe essere stato rimosso o l'URL è errato.", actual_url)
+                    else:
+                        _LOGGER.error("Upstream returned HTTP %s for stream %s.", upstream.status, actual_url)
+
                     raise HTTPException(
                         status_code=upstream.status,
                         detail=f"Upstream returned HTTP {upstream.status}",
@@ -253,6 +260,16 @@ class StreamProxy:
             status_code = upstream_resp.status
             if status_code >= 400:
                 upstream_resp.close()
+                if status_code == 403:
+                    if ".key" in lower_url:
+                        _LOGGER.error("AES Key access denied (403). Causa Nota: Il provider blocca il download della chiave (es. Referer mancante o CORS). Chromecast fallira'.")
+                    else:
+                        _LOGGER.error("Segment access denied (403) for %s. Causa Nota: Token scaduto o leech protection attivata.", segment_url)
+                elif status_code == 404:
+                    _LOGGER.error("Segment/Key not found (404) for %s.", segment_url)
+                else:
+                    _LOGGER.error("Upstream returned HTTP %s for segment %s", status_code, segment_url)
+
                 raise HTTPException(
                     status_code=status_code,
                     detail=f"Upstream returned HTTP {status_code}",

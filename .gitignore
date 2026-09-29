@@ -43,3 +43,6 @@ ENV/
 # Local test databases & persistent test data
 data/
 *.db
+
+# Worktrees
+.worktrees/

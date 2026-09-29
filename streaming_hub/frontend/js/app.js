@@ -1660,7 +1660,7 @@
         provider_id: source.provider_id,
         media_id: source.media_id,
         quality: source.quality,
-        prefer_fhd: false, // 720p HD with embedded audio track for robust browser playback
+        prefer_fhd: true,
       };
 
       const resp = await fetch(apiUrl("api/resolve"), {

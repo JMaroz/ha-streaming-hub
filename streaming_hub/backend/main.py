@@ -920,16 +920,16 @@ async def get_stream(token: str, request: Request, url: str | None = None) -> Re
 
 
 @app.api_route("/segment/{token}", methods=["GET", "HEAD"])
-async def get_segment(token: str, url: str = Query(...), request: Request = None) -> Response:
+async def get_segment(token: str, request: Request, url: str = Query(...)) -> Response:
     """HLS segment proxy forwarding injected headers supporting GET and HEAD."""
-    ingress_path = get_ingress_path(request) if request else ""
-    headers_dict = dict(request.headers) if request else {}
+    ingress_path = get_ingress_path(request)
+    headers_dict = dict(request.headers)
     return await stream_proxy.get_segment_response(
         token=token,
         segment_url=url,
         headers_override=headers_dict,
         root_path=ingress_path,
-        method=request.method if request else "GET",
+        method=request.method,
     )
 
 
