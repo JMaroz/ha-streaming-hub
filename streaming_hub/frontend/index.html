@@ -74,6 +74,10 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
                 <span>Titoli Già Visti</span>
               </button>
+              <button class="dropdown-item" id="btn-dropdown-settings">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                <span>Impostazioni & TMDb</span>
+              </button>
             </div>
           </div>
         </div>
@@ -431,6 +435,40 @@
         </div>
         <div class="profile-picker-footer">
           <p class="profile-picker-hint">Puoi aggiungere o gestire i componenti della famiglia nelle <strong>Impostazioni &gt; Componenti aggiuntivi &gt; Streaming Hub</strong> in Home Assistant.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings & TMDb Validation Modal -->
+    <div id="settings-modal" class="modal hidden">
+      <div class="modal-backdrop" id="settings-modal-backdrop"></div>
+      <div class="modal-dialog settings-modal-dialog">
+        <button id="settings-modal-close" class="modal-close-btn" aria-label="Chiudi">✕</button>
+        <div class="settings-modal-header">
+          <h2>Impostazioni &amp; Integratore TMDb</h2>
+          <p class="settings-modal-sub">Configura e verifica la chiave API di TheMovieDB (TMDb) per sbloccare locandine HD, trame e la disponibilità sulle piattaforme streaming (Watch Providers).</p>
+        </div>
+        <div class="settings-modal-body">
+          <div class="settings-section-card">
+            <div class="settings-card-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="section-card-icon"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+              <span>Stato Integrazione TMDb</span>
+              <span id="tmdb-status-badge" class="badge badge-status-unknown">In controllo...</span>
+            </div>
+            <p class="settings-help-text">
+              Senza una chiave API TMDb valida, Streaming Hub utilizza motori fallback (Cinemeta/TVmaze) che non includono i loghi e la disponibilità delle piattaforme streaming (Netflix, Prime Video, Disney+, ecc.).
+            </p>
+
+            <div class="tmdb-validation-box">
+              <label for="tmdb-key-input" class="form-label">Chiave API (v3) o Token Bearer (v4) TMDb:</label>
+              <div class="input-with-button">
+                <input type="password" id="tmdb-key-input" class="form-input" placeholder="Inserisci chiave API v3 o Token Bearer v4..." autocomplete="off">
+                <button id="btn-toggle-key-visibility" class="btn btn-secondary btn-icon-only" title="Mostra/Nascondi chiave">👁️</button>
+                <button id="btn-validate-tmdb" class="btn btn-primary">Verifica Chiave</button>
+              </div>
+              <div id="tmdb-validation-result" class="validation-result-msg hidden"></div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

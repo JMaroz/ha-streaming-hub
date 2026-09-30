@@ -157,6 +157,17 @@
     castIconVolMute: document.getElementById("cast-icon-vol-mute"),
     castBarVolSlider: document.getElementById("cast-bar-vol-slider"),
     castBarStop: document.getElementById("cast-bar-stop"),
+
+    // Settings & TMDb Validation
+    btnDropdownSettings: document.getElementById("btn-dropdown-settings"),
+    settingsModal: document.getElementById("settings-modal"),
+    settingsModalBackdrop: document.getElementById("settings-modal-backdrop"),
+    settingsModalClose: document.getElementById("settings-modal-close"),
+    tmdbStatusBadge: document.getElementById("tmdb-status-badge"),
+    tmdbKeyInput: document.getElementById("tmdb-key-input"),
+    btnToggleKeyVisibility: document.getElementById("btn-toggle-key-visibility"),
+    btnValidateTmdb: document.getElementById("btn-validate-tmdb"),
+    tmdbValidationResult: document.getElementById("tmdb-validation-result"),
   };
 
   // Helper: Format base API URL respecting Ingress
@@ -348,6 +359,36 @@
       });
     }
 
+    if (elements.btnDropdownSettings) {
+      elements.btnDropdownSettings.addEventListener("click", () => {
+        if (elements.profileDropdownWrapper) elements.profileDropdownWrapper.classList.remove("open");
+        if (elements.profileDropdownMenu) elements.profileDropdownMenu.classList.add("hidden");
+        openSettingsModal();
+      });
+    }
+
+    if (elements.settingsModalClose) {
+      elements.settingsModalClose.addEventListener("click", closeSettingsModal);
+    }
+
+    if (elements.settingsModalBackdrop) {
+      elements.settingsModalBackdrop.addEventListener("click", closeSettingsModal);
+    }
+
+    if (elements.btnToggleKeyVisibility && elements.tmdbKeyInput) {
+      elements.btnToggleKeyVisibility.addEventListener("click", () => {
+        const isPass = elements.tmdbKeyInput.type === "password";
+        elements.tmdbKeyInput.type = isPass ? "text" : "password";
+        elements.btnToggleKeyVisibility.textContent = isPass ? "🙈" : "👁️";
+      });
+    }
+
+    if (elements.btnValidateTmdb) {
+      elements.btnValidateTmdb.addEventListener("click", () => {
+        validateAndSaveTmdbKey();
+      });
+    }
+
     // Cast Control Bar Listeners
     if (elements.castBarPlayPause) {
       elements.castBarPlayPause.addEventListener("click", toggleCastPlayPause);
@@ -523,6 +564,100 @@
     });
 
     elements.profilePickerModal.classList.remove("hidden");
+  }
+
+  // Settings & TMDb Validation Modal Functions
+  async function openSettingsModal() {
+    if (!elements.settingsModal) return;
+    elements.settingsModal.classList.remove("hidden");
+    if (elements.tmdbValidationResult) {
+      elements.tmdbValidationResult.classList.add("hidden");
+    }
+    await checkTmdbStatus();
+  }
+
+  function closeSettingsModal() {
+    if (elements.settingsModal) {
+      elements.settingsModal.classList.add("hidden");
+    }
+  }
+
+  async function checkTmdbStatus() {
+    if (!elements.tmdbStatusBadge) return;
+    try {
+      const resp = await fetch(apiUrl("api/settings/tmdb/validate"));
+      if (resp.ok) {
+        const data = await resp.json();
+        updateTmdbStatusUI(data.valid, data.message, data.configured);
+      } else {
+        updateTmdbStatusUI(false, "Impossibile verificare lo stato TMDb.");
+      }
+    } catch (err) {
+      console.warn("Error checking TMDb status:", err);
+      updateTmdbStatusUI(false, "Errore di connessione.");
+    }
+  }
+
+  function updateTmdbStatusUI(valid, message, configured = false) {
+    if (!elements.tmdbStatusBadge) return;
+    if (valid) {
+      elements.tmdbStatusBadge.textContent = "ATTIVA E VALIDA";
+      elements.tmdbStatusBadge.className = "badge badge-status-valid";
+    } else if (configured) {
+      elements.tmdbStatusBadge.textContent = "CHIAVE NON VALIDA";
+      elements.tmdbStatusBadge.className = "badge badge-status-invalid";
+    } else {
+      elements.tmdbStatusBadge.textContent = "NON CONFIGURATA";
+      elements.tmdbStatusBadge.className = "badge badge-status-missing";
+    }
+  }
+
+  async function validateAndSaveTmdbKey() {
+    if (!elements.tmdbKeyInput || !elements.btnValidateTmdb) return;
+    const rawKey = elements.tmdbKeyInput.value.trim();
+    if (!rawKey) {
+      showValidationResult(false, "Inserisci una chiave API TMDb prima di verificare.");
+      return;
+    }
+
+    elements.btnValidateTmdb.disabled = true;
+    elements.btnValidateTmdb.textContent = "Verifica in corso...";
+    if (elements.tmdbValidationResult) {
+      elements.tmdbValidationResult.classList.add("hidden");
+    }
+
+    try {
+      const resp = await fetch(apiUrl("api/settings/tmdb/validate"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ api_key: rawKey, save: true }),
+      });
+
+      if (resp.ok) {
+        const data = await resp.json();
+        showValidationResult(data.valid, data.message);
+        updateTmdbStatusUI(data.valid, data.message, true);
+        if (data.valid) {
+          showToast("Chiave TMDb verificata e attivata con successo!", "success");
+          elements.tmdbKeyInput.value = "";
+        }
+      } else {
+        showValidationResult(false, "Errore nella richiesta di verifica.");
+      }
+    } catch (err) {
+      console.error("Error validating TMDb key:", err);
+      showValidationResult(false, "Errore di connessione durante la verifica.");
+    } finally {
+      elements.btnValidateTmdb.disabled = false;
+      elements.btnValidateTmdb.textContent = "Verifica Chiave";
+    }
+  }
+
+  function showValidationResult(success, message) {
+    if (!elements.tmdbValidationResult) return;
+    elements.tmdbValidationResult.textContent = message;
+    elements.tmdbValidationResult.className = `validation-result-msg ${success ? "success" : "error"}`;
+    elements.tmdbValidationResult.classList.remove("hidden");
   }
 
   async function selectProfile(profileId, force = false) {

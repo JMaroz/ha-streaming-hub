@@ -401,14 +401,45 @@ def extract_streaming_availability(item_dict_or_obj: Any, country_code: str) -> 
     }
 
 
+class ValidateTmdbKeyRequest(BaseModel):
+    api_key: str | None = None
+    save: bool = False
+
+
 @app.get("/api/settings")
 async def get_settings() -> dict[str, Any]:
     """Retrieve current settings, configured sources, and active engines."""
+    key = metadata_enricher.tmdb_api_key
+    masked_key = f"{key[:4]}...{key[-4:]}" if len(key) >= 8 else ("***" if key else "")
     return {
         "country": CONFIG.get("country", "IT"),
         "custom_dns": CONFIG.get("custom_dns", DNS_DEFAULT),
         "configured_sources": CONFIG.get("custom_sources", []),
         "active_sources": source_manager.list_sources(),
+        "tmdb_configured": bool(key),
+        "tmdb_key_masked": masked_key,
+    }
+
+
+@app.post("/api/settings/tmdb/validate")
+async def validate_tmdb_key(req: ValidateTmdbKeyRequest | None = None) -> dict[str, Any]:
+    """Validate a TMDb API key or v4 Bearer token against TMDb API and optionally save it dynamically."""
+    key_input = req.api_key if req and req.api_key is not None else CONFIG.get("tmdb_api_key", "")
+    valid, message = await metadata_enricher.validate_api_key(key_input)
+
+    if valid and req and req.save and req.api_key:
+        clean_key = req.api_key.strip().strip("\"'")
+        if clean_key.lower().startswith("bearer "):
+            clean_key = clean_key[7:].strip()
+        CONFIG["tmdb_api_key"] = clean_key
+        metadata_enricher.tmdb_api_key = clean_key
+        metadata_enricher.clear_cache()
+        _LOGGER.info("Successfully updated TMDb API key in active session.")
+
+    return {
+        "valid": valid,
+        "message": message,
+        "configured": bool(metadata_enricher.tmdb_api_key),
     }
 
 
@@ -648,6 +679,9 @@ async def get_title_details(media_type: str, title_id: str, profile_id: str = Qu
     """Fetch complete details, enriched metadata, and sources for a title with SQLite caching."""
     profile = get_profile_by_id(profile_id)
     active_country = (getattr(profile, "country", None) or CONFIG.get("country", "IT")).upper()
+    # Always use the primary global generic TMDb API key for all profiles
+    tmdb_key = CONFIG.get("tmdb_api_key") or metadata_enricher.tmdb_api_key
+
     # Check SQLite cache first for instant response
     cached = await db.get_title(title_id)
     if cached:
@@ -655,19 +689,24 @@ async def get_title_details(media_type: str, title_id: str, profile_id: str = Qu
             raise HTTPException(
                 status_code=403, detail="Contenuto non disponibile per il profilo selezionato (restrizione d'età)."
             )
-        # Check favorite status for this profile
-        cached["is_favorite"] = await db.is_favorite(title_id, profile_id=profile.id)
-        cached["streaming_availability"] = extract_streaming_availability(cached, active_country)
-        return cached
+        # Check if TMDb key is configured but cached item is missing watch_providers
+        has_wp = bool(cached.get("watch_providers"))
+        if not tmdb_key or has_wp:
+            cached["is_favorite"] = await db.is_favorite(title_id, profile_id=profile.id)
+            cached["streaming_availability"] = extract_streaming_availability(cached, active_country)
+            return cached
 
     try:
         item = await source_manager.get_details(media_type, title_id)
     except Exception as err:
         _LOGGER.error("Error fetching title %s: %s", title_id, err)
+        if cached:
+            cached["is_favorite"] = await db.is_favorite(title_id, profile_id=profile.id)
+            cached["streaming_availability"] = extract_streaming_availability(cached, active_country)
+            return cached
         raise HTTPException(status_code=404, detail=f"Titolo non trovato: {err}")
 
     # Enrich with TMDb or Cinemeta using profile's personal TMDb key if configured
-    tmdb_key = profile.tmdb_api_key or CONFIG.get("tmdb_api_key")
     if isinstance(item, Movie):
         await metadata_enricher.enrich_movie(item, api_key=tmdb_key)
     elif isinstance(item, TvSeries):

@@ -110,15 +110,55 @@ class MetadataEnricher:
             _LOGGER.debug("Cinemeta title search failed for %s: %s", title, err)
         return None
 
+    def clear_cache(self) -> None:
+        """Clear the in-memory metadata cache."""
+        self._cache.clear()
+
+    async def validate_api_key(self, api_key: str | None = None) -> tuple[bool, str]:
+        """Validate a TMDb API key or v4 Bearer token against TMDb authentication endpoint."""
+        key_to_test = (api_key if api_key is not None else self.tmdb_api_key or "").strip().strip("\"'")
+        if key_to_test.lower().startswith("bearer "):
+            key_to_test = key_to_test[7:].strip()
+        if not key_to_test:
+            return False, "La chiave API TMDb non è stata inserita o è vuota."
+
+        auth_headers, auth_params = self._get_tmdb_auth(key_to_test)
+        url = f"{TMDB_BASE_URL}/authentication"
+        session = await self._get_session()
+        req_headers = {"User-Agent": USER_AGENT}
+        if auth_headers:
+            req_headers.update(auth_headers)
+
+        try:
+            async with session.get(
+                url, params=auth_params, headers=req_headers, timeout=aiohttp.ClientTimeout(total=5)
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data and data.get("success") is True:
+                        return True, "Chiave API TMDb valida e funzionante."
+                    msg = data.get("status_message") if data else "Risposta non valida da TMDb."
+                    return False, f"Errore TMDb: {msg}"
+                elif resp.status == 401:
+                    return False, "Chiave API TMDb non valida o non autorizzata (401 Unauthorized)."
+                else:
+                    return False, f"TMDb ha risposto con codice di errore HTTP {resp.status}."
+        except Exception as err:
+            _LOGGER.warning("TMDb validation request failed: %s", err)
+            return False, f"Impossibile contattare i server TMDb: {err}"
+
     async def enrich_movie(self, movie: Movie, api_key: str | None = None) -> Movie:
         """Enrich movie details using TMDb or free fallback."""
         cache_key = f"movie:{movie.id}"
+        key_to_use = api_key or self.tmdb_api_key
         if cache_key in self._cache:
-            self._apply_movie_metadata(movie, self._cache[cache_key])
-            return movie
+            cached_meta = self._cache[cache_key]
+            has_wp = bool(cached_meta.get("watch/providers") or cached_meta.get("watch_providers"))
+            if not key_to_use or has_wp:
+                self._apply_movie_metadata(movie, cached_meta)
+                return movie
 
         metadata: dict[str, Any] | None = None
-        key_to_use = api_key or self.tmdb_api_key
         if key_to_use:
             metadata = await self._fetch_tmdb_movie(movie, key_to_use)
 
@@ -137,12 +177,15 @@ class MetadataEnricher:
     async def enrich_tv_series(self, series: TvSeries, api_key: str | None = None) -> TvSeries:
         """Enrich TV series details using TMDb or free fallback."""
         cache_key = f"tv:{series.id}"
+        key_to_use = api_key or self.tmdb_api_key
         if cache_key in self._cache:
-            self._apply_tv_metadata(series, self._cache[cache_key])
-            return series
+            cached_meta = self._cache[cache_key]
+            has_wp = bool(cached_meta.get("watch/providers") or cached_meta.get("watch_providers"))
+            if not key_to_use or has_wp:
+                self._apply_tv_metadata(series, cached_meta)
+                return series
 
         metadata: dict[str, Any] | None = None
-        key_to_use = api_key or self.tmdb_api_key
         if key_to_use:
             metadata = await self._fetch_tmdb_tv(series, key_to_use)
 
