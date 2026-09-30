@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.0](https://github.com/JMaroz/streaming-hub-ha/compare/v2.0.0...v2.1.0) (2026-09-30)
+
+
+### Features
+
+* **streaming:** add geolocated streaming availability and overhaul content badges ([fdab78c](https://github.com/JMaroz/streaming-hub-ha/commit/fdab78c3f03172a77645ef8da029871f95aa9bac))
+
 ## [2.0.0](https://github.com/JMaroz/streaming-hub-ha/releases/tag/v2.0.0) (2026-09-29)
 
 ### Features & Refactoring
