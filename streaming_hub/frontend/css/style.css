@@ -546,6 +546,75 @@ body {
   backdrop-filter: blur(4px);
 }
 
+.card-badge-cert, .badge-cert {
+  background: rgba(15, 23, 42, 0.88);
+  color: #f8fafc;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(4px);
+}
+
+.badge-cert-18 {
+  background: rgba(225, 29, 72, 0.25) !important;
+  color: #fda4af !important;
+  border: 1px solid rgba(225, 29, 72, 0.5) !important;
+}
+
+.badge-cert-16 {
+  background: rgba(239, 68, 68, 0.25) !important;
+  color: #fca5a5 !important;
+  border: 1px solid rgba(239, 68, 68, 0.5) !important;
+}
+
+.badge-cert-14 {
+  background: rgba(234, 88, 12, 0.25) !important;
+  color: #fdba74 !important;
+  border: 1px solid rgba(234, 88, 12, 0.5) !important;
+}
+
+.badge-cert-12 {
+  background: rgba(245, 158, 11, 0.25) !important;
+  color: #fde047 !important;
+  border: 1px solid rgba(245, 158, 11, 0.5) !important;
+}
+
+.badge-cert-6 {
+  background: rgba(202, 138, 4, 0.25) !important;
+  color: #fef08a !important;
+  border: 1px solid rgba(202, 138, 4, 0.5) !important;
+}
+
+.badge-cert-0 {
+  background: rgba(22, 163, 74, 0.25) !important;
+  color: #86efac !important;
+  border: 1px solid rgba(22, 163, 74, 0.5) !important;
+}
+
+.card-provider-logos {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(15, 23, 42, 0.82);
+  padding: 3px 5px;
+  border-radius: 6px;
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  pointer-events: none;
+}
+
+.mini-provider-logo {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
 .card-info {
   padding: 12px;
   display: flex;
@@ -808,6 +877,111 @@ body {
 .modal-cast p {
   color: var(--text-muted);
   font-size: 0.88rem;
+}
+
+/* Modal Watch Providers Section */
+.modal-watch-providers {
+  margin-bottom: 24px;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+.providers-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.providers-header h3 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #cbd5e1;
+  margin: 0;
+}
+
+.badge-country {
+  background: rgba(99, 102, 241, 0.2);
+  color: #818cf8;
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+}
+
+.providers-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.provider-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color);
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  transition: all var(--transition-fast);
+}
+
+.provider-card:hover {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.provider-logo {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.provider-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.provider-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.provider-type-tag {
+  font-size: 0.65rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.provider-type-tag.flatrate {
+  color: #60a5fa;
+}
+
+.provider-type-tag.free {
+  color: #4ade80;
+}
+
+.provider-type-tag.rent, .provider-type-tag.buy {
+  color: #fbbf24;
+}
+
+.providers-attribution {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-align: right;
+  margin-top: 4px;
+}
+
+.providers-attribution a {
+  color: #818cf8;
+  text-decoration: underline;
 }
 
 /* TV Section */

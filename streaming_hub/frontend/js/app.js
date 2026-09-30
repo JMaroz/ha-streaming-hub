@@ -113,6 +113,10 @@
     modalPlot: document.getElementById("modal-plot"),
     modalCastSection: document.getElementById("modal-cast-section"),
     modalCastText: document.getElementById("modal-cast-text"),
+    modalWatchProviders: document.getElementById("modal-watch-providers"),
+    providersCountryBadge: document.getElementById("providers-country-badge"),
+    providersList: document.getElementById("providers-list"),
+    justwatchLink: document.getElementById("justwatch-link"),
     tvSeriesSection: document.getElementById("tv-series-section"),
     seasonsTabs: document.getElementById("seasons-tabs"),
     episodesList: document.getElementById("episodes-list"),
@@ -941,6 +945,24 @@
         `;
       }
 
+      // Mini streaming provider logos overlay on card
+      let miniProvidersHtml = "";
+      const avail = item.streaming_availability || (item.watch_providers && (item.watch_providers["IT"] || item.watch_providers[Object.keys(item.watch_providers)[0]]));
+      let pLogos = [];
+      if (avail) {
+        const flat = avail.flatrate || [];
+        const free = avail.free || [];
+        const combined = [...flat, ...free];
+        pLogos = combined.filter((p) => p.logo_url || p.logo_path).slice(0, 3);
+      }
+      if (pLogos.length > 0) {
+        miniProvidersHtml = `
+          <div class="card-provider-logos" title="Disponibile in streaming">
+            ${pLogos.map((p) => `<img class="mini-provider-logo" src="${p.logo_url || ('https://image.tmdb.org/t/p/w200' + p.logo_path)}" alt="${escapeHtml(p.provider_name)}" title="${escapeHtml(p.provider_name)}">`).join("")}
+          </div>
+        `;
+      }
+
       card.innerHTML = `
         <div class="card-poster-wrap">
           <img class="card-poster" src="${posterSrc}" alt="${escapeHtml(item.title)}" loading="lazy">
@@ -949,6 +971,7 @@
             ${certBadgeHtml}
             ${ratingLabel ? `<span class="card-badge-rating">${ratingLabel}</span>` : ""}
           </div>
+          ${miniProvidersHtml}
         </div>
         <div class="card-info">
           <div class="card-title" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</div>
@@ -1451,6 +1474,9 @@
       elements.modalCastSection.classList.add("hidden");
     }
 
+    // Streaming Watch Providers
+    renderWatchProviders(item.streaming_availability);
+
     const isTv = item.type === "tv" || (item.seasons && item.seasons.length > 0);
     if (isTv) {
       elements.tvSeriesSection.classList.remove("hidden");
@@ -1461,6 +1487,66 @@
     }
 
     updatePlayButtonText();
+  }
+
+  // Render Watch Providers (Streaming Platforms)
+  function renderWatchProviders(avail) {
+    if (!elements.modalWatchProviders || !elements.providersList) return;
+
+    if (!avail || (!avail.flatrate?.length && !avail.free?.length && !avail.ads?.length && !avail.rent?.length && !avail.buy?.length)) {
+      elements.modalWatchProviders.classList.add("hidden");
+      return;
+    }
+
+    if (elements.providersCountryBadge) {
+      elements.providersCountryBadge.textContent = avail.country || "IT";
+    }
+
+    if (elements.justwatchLink && avail.link) {
+      elements.justwatchLink.href = avail.link;
+    }
+
+    elements.providersList.innerHTML = "";
+    const fragment = document.createDocumentFragment();
+
+    const categories = [
+      { key: "flatrate", label: "Abbonamento", badgeClass: "flatrate" },
+      { key: "free", label: "Gratuito", badgeClass: "free" },
+      { key: "ads", label: "Gratis con Pubblicità", badgeClass: "free" },
+      { key: "rent", label: "Noleggio", badgeClass: "rent" },
+      { key: "buy", label: "Acquisto", badgeClass: "buy" },
+    ];
+
+    let renderedCount = 0;
+
+    categories.forEach((cat) => {
+      const providers = avail[cat.key] || [];
+      providers.forEach((p) => {
+        renderedCount++;
+        const pCard = document.createElement("div");
+        pCard.className = "provider-card";
+
+        const logoSrc = p.logo_url || (p.logo_path ? `https://image.tmdb.org/t/p/w200${p.logo_path}` : "");
+        const logoHtml = logoSrc ? `<img class="provider-logo" src="${logoSrc}" alt="${escapeHtml(p.provider_name)}">` : "";
+
+        pCard.innerHTML = `
+          ${logoHtml}
+          <div class="provider-info">
+            <span class="provider-name">${escapeHtml(p.provider_name)}</span>
+            <span class="provider-type-tag ${cat.badgeClass}">${cat.label}</span>
+          </div>
+        `;
+
+        fragment.appendChild(pCard);
+      });
+    });
+
+    if (renderedCount > 0) {
+      elements.providersList.appendChild(fragment);
+      elements.modalWatchProviders.classList.remove("hidden");
+    } else {
+      elements.modalWatchProviders.classList.add("hidden");
+    }
   }
 
   // Render TV Seasons & Episodes

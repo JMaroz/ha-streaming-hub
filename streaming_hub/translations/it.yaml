@@ -3,6 +3,9 @@ configuration:
   log_level:
     name: "Livello di Log"
     description: "Controlla il livello di dettaglio dei log dell'applicazione."
+  country:
+    name: "Codice Paese per Disponibilità Streaming"
+    description: "Codice ISO 3166-1 (es. IT, US, GB, FR, DE, ES) per determinare la disponibilità dei film e serie TV su Netflix, Prime Video, Disney+, ecc."
   custom_sources:
     name: "Sorgenti di Streaming Personalizzate"
     description: >-

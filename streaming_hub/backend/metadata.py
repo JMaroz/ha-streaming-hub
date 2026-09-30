@@ -180,14 +180,14 @@ class MetadataEnricher:
                 return None
 
             detail_url = f"{TMDB_BASE_URL}/movie/{tmdb_id}"
-            params = {"language": "it-IT", "append_to_response": "credits,release_dates", **auth_params}
+            params = {"language": "it-IT", "append_to_response": "credits,release_dates,watch/providers", **auth_params}
             return await self._get_json(detail_url, params=params, headers=auth_headers)
         except Exception as err:
             _LOGGER.debug("TMDb fetch movie failed for %s: %s", movie.title, err)
             return None
 
     async def _fetch_tmdb_tv(self, series: TvSeries, api_key: str | None = None) -> dict[str, Any] | None:
-        """Fetch TV series metadata from TMDb including content ratings."""
+        """Fetch TV series metadata from TMDb including content ratings and watch providers."""
         auth_headers, auth_params = self._get_tmdb_auth(api_key)
         try:
             tmdb_id = series.tmdb_id
@@ -205,7 +205,7 @@ class MetadataEnricher:
                 return None
 
             detail_url = f"{TMDB_BASE_URL}/tv/{tmdb_id}"
-            params = {"language": "it-IT", "append_to_response": "credits,content_ratings", **auth_params}
+            params = {"language": "it-IT", "append_to_response": "credits,content_ratings,watch/providers", **auth_params}
             return await self._get_json(detail_url, params=params, headers=auth_headers)
         except Exception as err:
             _LOGGER.debug("TMDb fetch TV series failed for %s: %s", series.title, err)
@@ -313,6 +313,11 @@ class MetadataEnricher:
                     movie.director = cr.get("name")
                     break
 
+        # Extract watch providers if returned by TMDb
+        wp_data = meta.get("watch/providers") or meta.get("watch_providers")
+        if isinstance(wp_data, dict) and "results" in wp_data:
+            movie.watch_providers = wp_data.get("results", {})
+
     def _apply_tv_metadata(self, series: TvSeries, meta: dict[str, Any]) -> None:
         """Apply enriched metadata to TvSeries object."""
         if meta.get("id"):
@@ -355,6 +360,11 @@ class MetadataEnricher:
 
         if not series.certification and meta.get("certification"):
             series.certification = str(meta["certification"])
+
+        # Extract watch providers if returned by TMDb
+        wp_data = meta.get("watch/providers") or meta.get("watch_providers")
+        if isinstance(wp_data, dict) and "results" in wp_data:
+            series.watch_providers = wp_data.get("results", {})
 
         if meta.get("genres"):
             genres = []

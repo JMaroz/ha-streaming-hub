@@ -56,6 +56,7 @@ def load_options() -> dict[str, Any]:
 
     options = {
         "log_level": os.getenv("LOG_LEVEL", "info"),
+        "country": str(os.getenv("COUNTRY", "IT")).strip().upper(),
         "custom_dns": os.getenv("CUSTOM_DNS", DNS_DEFAULT),
         "tmdb_api_key": os.getenv("TMDB_API_KEY", ""),
         "stream_port": int(os.getenv("STREAM_PORT", "8099")),
@@ -352,8 +353,51 @@ async def get_status(request: Request) -> dict[str, Any]:
         "supervisor_connected": ha_client.is_available,
         "sources": source_manager.list_sources(),
         "dns_mode": CONFIG.get("custom_dns"),
+        "country": CONFIG.get("country", "IT"),
         "tmdb_configured": bool(metadata_enricher.tmdb_api_key),
         "active_stream_sessions": len(stream_proxy._sessions),
+    }
+
+
+def extract_streaming_availability(item_dict_or_obj: Any, country_code: str) -> dict[str, Any]:
+    """Format country-specific watch providers from TMDb results."""
+    c_code = (country_code or "IT").upper().strip()
+    if isinstance(item_dict_or_obj, dict):
+        raw_wp = item_dict_or_obj.get("watch_providers") or {}
+    else:
+        raw_wp = getattr(item_dict_or_obj, "watch_providers", {}) or {}
+
+    c_data = raw_wp.get(c_code, {}) if isinstance(raw_wp, dict) else {}
+    from .metadata import TMDB_IMAGE_BASE
+
+    def _fmt_list(p_list: Any) -> list[dict[str, Any]]:
+        if not p_list or not isinstance(p_list, list):
+            return []
+        res: list[dict[str, Any]] = []
+        for p in p_list:
+            if isinstance(p, dict) and p.get("provider_name"):
+                logo_path = p.get("logo_path")
+                logo_url = f"{TMDB_IMAGE_BASE}{logo_path}" if logo_path else None
+                res.append(
+                    {
+                        "provider_id": p.get("provider_id"),
+                        "provider_name": p.get("provider_name"),
+                        "logo_path": logo_path,
+                        "logo_url": logo_url,
+                        "display_priority": p.get("display_priority", 99),
+                    }
+                )
+        res.sort(key=lambda x: x["display_priority"])
+        return res
+
+    return {
+        "country": c_code,
+        "link": c_data.get("link") if isinstance(c_data, dict) else None,
+        "flatrate": _fmt_list(c_data.get("flatrate") if isinstance(c_data, dict) else None),
+        "free": _fmt_list(c_data.get("free") if isinstance(c_data, dict) else None),
+        "ads": _fmt_list(c_data.get("ads") if isinstance(c_data, dict) else None),
+        "rent": _fmt_list(c_data.get("rent") if isinstance(c_data, dict) else None),
+        "buy": _fmt_list(c_data.get("buy") if isinstance(c_data, dict) else None),
     }
 
 
@@ -361,6 +405,7 @@ async def get_status(request: Request) -> dict[str, Any]:
 async def get_settings() -> dict[str, Any]:
     """Retrieve current settings, configured sources, and active engines."""
     return {
+        "country": CONFIG.get("country", "IT"),
         "custom_dns": CONFIG.get("custom_dns", DNS_DEFAULT),
         "configured_sources": CONFIG.get("custom_sources", []),
         "active_sources": source_manager.list_sources(),
@@ -516,6 +561,10 @@ async def get_latest(
             pass
 
     results = [item.to_dict() for item in filtered]
+    active_country = (getattr(profile, "country", None) or CONFIG.get("country", "IT")).upper()
+    for r in results:
+        r["streaming_availability"] = extract_streaming_availability(r, active_country)
+
     from_idx = (page - 1) * 30 + 1 if results else 0
     to_idx = from_idx + len(results) - 1 if results else 0
 
@@ -544,6 +593,9 @@ async def search_catalog(
     await db.enrich_items_with_cached_metadata(items)
     filtered = [item for item in items if is_title_allowed_for_profile(item, profile)]
     results = [item.to_dict() for item in filtered]
+    active_country = (getattr(profile, "country", None) or CONFIG.get("country", "IT")).upper()
+    for r in results:
+        r["streaming_availability"] = extract_streaming_availability(r, active_country)
     return {"query": query, "source": source, "profile_id": profile.id, "count": len(results), "results": results}
 
 
@@ -573,6 +625,9 @@ async def get_by_genre(
     await db.enrich_items_with_cached_metadata(merged)
     filtered = [item for item in merged if is_title_allowed_for_profile(item, profile)]
     results = [item.to_dict() for item in filtered]
+    active_country = (getattr(profile, "country", None) or CONFIG.get("country", "IT")).upper()
+    for r in results:
+        r["streaming_availability"] = extract_streaming_availability(r, active_country)
     from_idx = (page - 1) * 30 + 1 if results else 0
     to_idx = from_idx + len(results) - 1 if results else 0
 
@@ -592,6 +647,7 @@ async def get_by_genre(
 async def get_title_details(media_type: str, title_id: str, profile_id: str = Query("default")) -> dict[str, Any]:
     """Fetch complete details, enriched metadata, and sources for a title with SQLite caching."""
     profile = get_profile_by_id(profile_id)
+    active_country = (getattr(profile, "country", None) or CONFIG.get("country", "IT")).upper()
     # Check SQLite cache first for instant response
     cached = await db.get_title(title_id)
     if cached:
@@ -601,6 +657,7 @@ async def get_title_details(media_type: str, title_id: str, profile_id: str = Qu
             )
         # Check favorite status for this profile
         cached["is_favorite"] = await db.is_favorite(title_id, profile_id=profile.id)
+        cached["streaming_availability"] = extract_streaming_availability(cached, active_country)
         return cached
 
     try:
@@ -630,6 +687,7 @@ async def get_title_details(media_type: str, title_id: str, profile_id: str = Qu
 
     data = item.to_dict()
     data["is_favorite"] = await db.is_favorite(title_id, profile_id=profile.id)
+    data["streaming_availability"] = extract_streaming_availability(data, active_country)
     return data
 
 

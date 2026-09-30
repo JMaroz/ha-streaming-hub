@@ -3,6 +3,9 @@ configuration:
   log_level:
     name: "Log Level"
     description: "Controls the verbosity of the add-on logs."
+  country:
+    name: "Country Code for Streaming Availability"
+    description: "ISO 3166-1 country code (e.g. IT, US, GB, FR, DE, ES) to determine availability on Netflix, Prime Video, Disney+, etc."
   custom_sources:
     name: "Custom Streaming Sources"
     description: >-

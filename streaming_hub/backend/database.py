@@ -147,6 +147,11 @@ class MediaDatabase:
                 pass
 
             try:
+                conn.execute("ALTER TABLE titles ADD COLUMN watch_providers TEXT;")
+            except Exception:
+                pass
+
+            try:
                 conn.execute("ALTER TABLE titles ADD COLUMN trakt_id INTEGER;")
             except Exception:
                 pass
@@ -188,6 +193,7 @@ class MediaDatabase:
         genres_json = json.dumps(item.genres or [])
         catalogs_json = json.dumps(item.catalogs or [])
         sources_json = json.dumps([s.to_dict() for s in getattr(item, "sources", [])])
+        watch_providers_json = json.dumps(getattr(item, "watch_providers", {}) or {})
         raw_json = json.dumps(item.to_dict())
 
         with self._get_connection() as conn:
@@ -198,8 +204,8 @@ class MediaDatabase:
                     poster_url, backdrop_url, description, genres,
                     duration, rating, certification, cast_list, director,
                     source_a_url, source_b_url,
-                    tmdb_id, imdb_id, trakt_id, catalogs, sources, raw_json, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    tmdb_id, imdb_id, trakt_id, catalogs, sources, watch_providers, raw_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(id) DO UPDATE SET
                     title=excluded.title,
                     original_title=excluded.original_title,
@@ -220,6 +226,7 @@ class MediaDatabase:
                     trakt_id=COALESCE(excluded.trakt_id, titles.trakt_id),
                     catalogs=excluded.catalogs,
                     sources=excluded.sources,
+                    watch_providers=excluded.watch_providers,
                     raw_json=excluded.raw_json,
                     updated_at=CURRENT_TIMESTAMP;
                 """,
@@ -245,6 +252,7 @@ class MediaDatabase:
                     getattr(item, "trakt_id", None),
                     catalogs_json,
                     sources_json,
+                    watch_providers_json,
                     raw_json,
                 ),
             )
@@ -267,14 +275,14 @@ class MediaDatabase:
         return None
 
     async def enrich_items_with_cached_metadata(self, items: list[Any]) -> None:
-        """Enrich a batch of items in-place with SQLite-cached certification, genres and URLs."""
+        """Enrich a batch of items in-place with SQLite-cached metadata."""
         if not items:
             return
         async with self._lock:
             await asyncio.to_thread(self._enrich_items_sync, items)
 
     def _enrich_items_sync(self, items: list[Any]) -> None:
-        """Synchronously match and enrich items with cached certification, genres and URLs."""
+        """Synchronously match and enrich items with cached certification, duration, rating, watch_providers and genres."""
         id_map: dict[str, Any] = {}
         for it in items:
             mid = it.get("id") if isinstance(it, dict) else getattr(it, "id", None)
@@ -291,7 +299,7 @@ class MediaDatabase:
                 chunk = keys[i : i + chunk_size]
                 placeholders = ",".join("?" * len(chunk))
                 cursor = conn.execute(
-                    f"SELECT id, certification, genres, tmdb_id, source_a_url, source_b_url FROM titles WHERE id IN ({placeholders})",
+                    f"SELECT id, certification, duration, rating, watch_providers, genres, tmdb_id, source_a_url, source_b_url, poster_url, backdrop_url FROM titles WHERE id IN ({placeholders})",
                     chunk,
                 )
                 for row in cursor.fetchall():
@@ -300,6 +308,9 @@ class MediaDatabase:
                     if not target:
                         continue
                     cert = row["certification"]
+                    dur = row["duration"]
+                    rat = row["rating"]
+                    raw_wp = row["watch_providers"]
                     raw_g = row["genres"]
                     src_a = row["source_a_url"]
                     src_b = row["source_b_url"]
@@ -309,6 +320,28 @@ class MediaDatabase:
                             target["certification"] = cert
                         else:
                             target.certification = cert
+                    if dur is not None:
+                        if isinstance(target, dict):
+                            if not target.get("duration"):
+                                target["duration"] = dur
+                        elif not getattr(target, "duration", None):
+                            target.duration = dur
+                    if rat is not None:
+                        if isinstance(target, dict):
+                            if not target.get("rating"):
+                                target["rating"] = rat
+                        elif not getattr(target, "rating", None):
+                            target.rating = rat
+                    if raw_wp:
+                        try:
+                            wp_dict = json.loads(raw_wp)
+                            if wp_dict:
+                                if isinstance(target, dict):
+                                    target["watch_providers"] = wp_dict
+                                else:
+                                    target.watch_providers = wp_dict
+                        except Exception:
+                            pass
                     if raw_g:
                         try:
                             g_list = (

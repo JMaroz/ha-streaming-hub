@@ -77,6 +77,7 @@ class Movie:
     trakt_id: int | None = None
     certification: str | None = None
     catalogs: list[str] = field(default_factory=list)
+    watch_providers: dict[str, Any] = field(default_factory=dict)
 
     sources: list[ProviderSource] = field(default_factory=list)
 
@@ -122,6 +123,7 @@ class Movie:
             "imdb_id": self.imdb_id,
             "trakt_id": self.trakt_id,
             "catalogs": self.catalogs,
+            "watch_providers": self.watch_providers,
             "sources": [s.to_dict() for s in self.sources],
             "added_at": self.added_at.isoformat() if self.added_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
@@ -153,6 +155,7 @@ class Movie:
             imdb_id=data.get("imdb_id"),
             trakt_id=data.get("trakt_id"),
             catalogs=data.get("catalogs", []),
+            watch_providers=data.get("watch_providers", {}),
             sources=sources,
             added_at=added_at,
             updated_at=updated_at,
@@ -242,6 +245,7 @@ class TvSeries:
     trakt_id: int | None = None
     certification: str | None = None
     catalogs: list[str] = field(default_factory=list)
+    watch_providers: dict[str, Any] = field(default_factory=dict)
 
     seasons: list[TvSeason] = field(default_factory=list)
 
@@ -286,6 +290,7 @@ class TvSeries:
             "imdb_id": self.imdb_id,
             "trakt_id": self.trakt_id,
             "catalogs": self.catalogs,
+            "watch_providers": self.watch_providers,
             "seasons": [s.to_dict() for s in self.seasons],
             "added_at": self.added_at.isoformat() if self.added_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
@@ -315,6 +320,7 @@ class TvSeries:
             imdb_id=data.get("imdb_id"),
             trakt_id=data.get("trakt_id"),
             catalogs=data.get("catalogs", []),
+            watch_providers=data.get("watch_providers", {}),
             seasons=[TvSeason.from_dict(s) for s in data.get("seasons", [])],
             added_at=added_at,
             updated_at=updated_at,
@@ -329,6 +335,7 @@ class Profile:
     name: str
     avatar: str = "avatar_1"
     rating_filter: str = "ALL"  # ALL, 18+, 14+, 6+, T
+    country: str = ""
     tmdb_api_key: str = ""
     trakt_client_id: str = ""
     trakt_access_token: str = ""
@@ -341,6 +348,7 @@ class Profile:
             "name": self.name,
             "avatar": self.avatar,
             "rating_filter": self.rating_filter,
+            "country": self.country,
             "has_pin": bool(self.pin),
             "tmdb_configured": bool(self.tmdb_api_key),
             "trakt_configured": bool(self.trakt_client_id),
@@ -361,6 +369,7 @@ class Profile:
             name=str(data.get("name", "Principale")),
             avatar=str(data.get("avatar", "avatar_1")),
             rating_filter=str(data.get("rating_filter", "ALL")),
+            country=str(data.get("country", "")).strip().upper(),
             tmdb_api_key=str(data.get("tmdb_api_key", "")).strip(),
             trakt_client_id=str(data.get("trakt_client_id", "")).strip(),
             trakt_access_token=str(data.get("trakt_access_token", "")).strip(),
