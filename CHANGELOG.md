@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.1](https://github.com/JMaroz/streaming-hub-ha/compare/v2.2.0...v2.2.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* **rating:** prevent adult content leakage in kids profiles ([76c8fd5](https://github.com/JMaroz/streaming-hub-ha/commit/76c8fd52dded3fcd2e01e03e9017c95cb34e910a))
+
 ## [2.2.0](https://github.com/JMaroz/streaming-hub-ha/compare/v2.1.0...v2.2.0) (2026-09-30)
 
 
