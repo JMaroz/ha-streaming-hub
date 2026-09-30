@@ -335,6 +335,12 @@ class MetadataEnricher:
         if not movie.certification and meta.get("certification"):
             movie.certification = str(meta["certification"])
 
+        # Check adult flag and certification
+        if meta.get("adult") or meta.get("is_adult"):
+            movie.is_adult = True
+        elif movie.certification and movie.certification.upper().strip() in ("VM18", "VM 18", "18+", "+18", "NC-17", "PEGI 18", "XXX"):
+            movie.is_adult = True
+
         if meta.get("genres"):
             genres = []
             for g in meta["genres"]:
@@ -344,6 +350,8 @@ class MetadataEnricher:
                     genres.append(g)
             if genres:
                 movie.genres = genres
+                if any(ag in [x.lower() for x in genres] for ag in ("erotico", "erotica", "erotismo", "pornografico", "porno", "softcore", "hardcore", "hentai", "xxx", "adulti", "adult")):
+                    movie.is_adult = True
 
         if meta.get("credits"):
             credits = meta["credits"]
@@ -404,6 +412,11 @@ class MetadataEnricher:
         if not series.certification and meta.get("certification"):
             series.certification = str(meta["certification"])
 
+        if meta.get("adult") or meta.get("is_adult"):
+            series.is_adult = True
+        elif series.certification and series.certification.upper().strip() in ("VM18", "VM 18", "18+", "+18", "TV-MA", "NC-17", "PEGI 18", "XXX"):
+            series.is_adult = True
+
         # Extract watch providers if returned by TMDb
         wp_data = meta.get("watch/providers") or meta.get("watch_providers")
         if isinstance(wp_data, dict) and "results" in wp_data:
@@ -418,6 +431,8 @@ class MetadataEnricher:
                     genres.append(g)
             if genres:
                 series.genres = genres
+                if any(ag in [x.lower() for x in genres] for ag in ("erotico", "erotica", "erotismo", "pornografico", "porno", "softcore", "hardcore", "hentai", "xxx", "adulti", "adult")):
+                    series.is_adult = True
 
     async def enrich_tv_season(self, series_tmdb_id: int | None, season: Any) -> Any:
         """Enrich TV season episodes with TMDb episode titles, overviews, and screenshots."""

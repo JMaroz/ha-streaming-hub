@@ -243,19 +243,35 @@ class ReactiveStreamClient:
 
         target = next((img for img in valid_images if img.get("type") == prefer_type), None)
         if not target and prefer_type == "poster":
-            target = next((img for img in valid_images if img.get("type") in ("cover_mobile", "background")), None)
+            target = next(
+                (img for img in valid_images if img.get("type") in ("cover_mobile", "background", "cover")), None
+            )
         if not target:
             target = valid_images[0]
 
         filename = target.get("filename")
         if not filename:
-            return target.get("original_url_field")
+            for k in ("url", "original_url", "path", "src", "original_url_field"):
+                val = target.get(k)
+                if val and isinstance(val, str):
+                    if val.startswith(("http://", "https://")):
+                        return val
+                    filename = val
+                    break
+
+        if not filename:
+            return None
 
         if isinstance(filename, str) and filename.startswith(("http://", "https://")):
             return filename
 
-        cdn_host = self.base_url.replace("://", "://cdn.").rstrip("/")
-        return f"{cdn_host}/images/{filename}"
+        clean_fn = str(filename).lstrip("/")
+        if clean_fn.startswith("images/"):
+            clean_fn = clean_fn[7:]
+
+        clean_base = self.base_url.rstrip("/")
+        cdn_host = clean_base.replace("://", "://cdn.")
+        return f"{cdn_host}/images/{clean_fn}"
 
     @staticmethod
     def _extract_genre_names(item: dict[str, Any]) -> list[str]:
@@ -783,32 +799,31 @@ class ReactiveStreamClient:
         else:
             clean_sc_id = clean_id.split("-")[0]
 
+        preview: dict[str, Any] | None = None
+        if not slug and clean_sc_id:
+            preview = await self.get_title_preview(clean_sc_id)
+            if preview and isinstance(preview, dict) and preview.get("slug"):
+                slug = str(preview["slug"])
+
         title_url = (
             f"{self.base_url}it/titles/{clean_sc_id}-{slug}" if slug else f"{self.base_url}it/titles/{clean_sc_id}"
         )
 
         title_data: dict[str, Any] | None = None
-        try:
-            html_text = await self._request(title_url)
-            page_data = self.extract_data_page(html_text)
-            title_data = page_data.get("props", {}).get("title")
-        except Exception as err:
-            _LOGGER.debug("Direct request for movie %s failed: %s", media_id, err)
+        if slug:
+            try:
+                html_text = await self._request(title_url)
+                page_data = self.extract_data_page(html_text)
+                title_data = page_data.get("props", {}).get("title")
+            except Exception as err:
+                _LOGGER.debug("Direct request for movie %s failed: %s", media_id, err)
 
-        if not title_data and clean_sc_id:
+        if not title_data and preview:
+            title_data = preview
+        elif not title_data and clean_sc_id:
             preview = await self.get_title_preview(clean_sc_id)
             if preview and isinstance(preview, dict):
-                preview_slug = preview.get("slug")
-                if preview_slug and preview_slug != slug:
-                    retry_url = f"{self.base_url}it/titles/{clean_sc_id}-{preview_slug}"
-                    try:
-                        html_text = await self._request(retry_url)
-                        page_data = self.extract_data_page(html_text)
-                        title_data = page_data.get("props", {}).get("title")
-                    except Exception:
-                        pass
-                if not title_data:
-                    title_data = preview
+                title_data = preview
 
         if not title_data or not isinstance(title_data, dict):
             raise ValueError(f"No title data found for movie {media_id}")
@@ -868,36 +883,33 @@ class ReactiveStreamClient:
         else:
             clean_sc_id = clean_id.split("-")[0]
 
+        preview: dict[str, Any] | None = None
+        if not slug and clean_sc_id:
+            preview = await self.get_title_preview(clean_sc_id)
+            if preview and isinstance(preview, dict) and preview.get("slug"):
+                slug = str(preview["slug"])
+
         series_url = (
             f"{self.base_url}it/titles/{clean_sc_id}-{slug}" if slug else f"{self.base_url}it/titles/{clean_sc_id}"
         )
 
         title_data: dict[str, Any] | None = None
         props: dict[str, Any] = {}
-        try:
-            html_text = await self._request(series_url)
-            page_data = self.extract_data_page(html_text)
-            props = page_data.get("props", {})
-            title_data = props.get("title")
-        except Exception as err:
-            _LOGGER.debug("Direct request for TV series %s failed: %s", media_id, err)
+        if slug:
+            try:
+                html_text = await self._request(series_url)
+                page_data = self.extract_data_page(html_text)
+                props = page_data.get("props", {})
+                title_data = props.get("title")
+            except Exception as err:
+                _LOGGER.debug("Direct request for TV series %s failed: %s", media_id, err)
 
-        if not title_data and clean_sc_id:
+        if not title_data and preview:
+            title_data = preview
+        elif not title_data and clean_sc_id:
             preview = await self.get_title_preview(clean_sc_id)
             if preview and isinstance(preview, dict):
-                preview_slug = preview.get("slug")
-                if preview_slug and preview_slug != slug:
-                    retry_url = f"{self.base_url}it/titles/{clean_sc_id}-{preview_slug}"
-                    try:
-                        html_text = await self._request(retry_url)
-                        page_data = self.extract_data_page(html_text)
-                        props = page_data.get("props", {})
-                        title_data = props.get("title")
-                        slug = preview_slug
-                    except Exception as retry_err:
-                        _LOGGER.debug("Retry series URL %s failed: %s", retry_url, retry_err)
-                if not title_data:
-                    title_data = preview
+                title_data = preview
 
         if not title_data or not isinstance(title_data, dict):
             raise ValueError(f"No title data found for series {media_id}")

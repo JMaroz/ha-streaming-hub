@@ -76,6 +76,7 @@ class Movie:
     imdb_id: str | None = None
     trakt_id: int | None = None
     certification: str | None = None
+    is_adult: bool = False
     catalogs: list[str] = field(default_factory=list)
     watch_providers: dict[str, Any] = field(default_factory=dict)
 
@@ -115,6 +116,7 @@ class Movie:
             "duration": self.duration,
             "rating": self.rating,
             "certification": self.certification,
+            "is_adult": self.is_adult,
             "cast": self.cast,
             "director": self.director,
             "source_a_url": self.source_a_url,
@@ -147,6 +149,7 @@ class Movie:
             duration=data.get("duration"),
             rating=data.get("rating"),
             certification=data.get("certification"),
+            is_adult=bool(data.get("is_adult", False)),
             cast=data.get("cast", []),
             director=data.get("director"),
             source_a_url=data.get("source_a_url") or data.get("streamingcommunity_url", ""),
@@ -244,6 +247,7 @@ class TvSeries:
     imdb_id: str | None = None
     trakt_id: int | None = None
     certification: str | None = None
+    is_adult: bool = False
     catalogs: list[str] = field(default_factory=list)
     watch_providers: dict[str, Any] = field(default_factory=dict)
 
@@ -282,6 +286,7 @@ class TvSeries:
             "genres": self.genres,
             "rating": self.rating,
             "certification": self.certification,
+            "is_adult": self.is_adult,
             "cast": self.cast,
             "director": self.director,
             "source_a_url": self.source_a_url,
@@ -312,6 +317,7 @@ class TvSeries:
             genres=data.get("genres", []),
             rating=data.get("rating"),
             certification=data.get("certification"),
+            is_adult=bool(data.get("is_adult", False)),
             cast=data.get("cast", []),
             director=data.get("director"),
             source_a_url=data.get("source_a_url") or data.get("streamingcommunity_url", ""),

@@ -16,6 +16,10 @@
     availableSources: [],
     searchQuery: "",
     catalogItems: [],
+    currentPage: 1,
+    hasMore: true,
+    isLoadingMore: false,
+    activeMode: "latest",
     selectedItem: null,
     selectedSeason: 1,
     selectedEpisode: null,
@@ -215,6 +219,44 @@
 
   // Event Listeners
   function setupEventListeners() {
+    // Infinite Scroll Handler
+    let isScrollDebounced = false;
+    window.addEventListener("scroll", () => {
+      if (isScrollDebounced || state.isLoadingMore || !state.hasMore) return;
+      if (state.activeMode !== "latest" && state.activeMode !== "genre") return;
+
+      const scrollPosition = window.innerHeight + window.scrollY;
+      const threshold = document.body.offsetHeight - 600;
+
+      if (scrollPosition >= threshold) {
+        isScrollDebounced = true;
+        setTimeout(() => {
+          isScrollDebounced = false;
+        }, 250);
+
+        state.isLoadingMore = true;
+        const nextPage = state.currentPage + 1;
+
+        if (state.activeMode === "genre" && state.activeGenre) {
+          loadByGenre(state.activeGenre, nextPage, true)
+            .then(() => {
+              state.currentPage = nextPage;
+            })
+            .finally(() => {
+              state.isLoadingMore = false;
+            });
+        } else if (state.activeMode === "latest") {
+          loadCatalog(nextPage, true)
+            .then(() => {
+              state.currentPage = nextPage;
+            })
+            .finally(() => {
+              state.isLoadingMore = false;
+            });
+        }
+      }
+    });
+
     // Navigation Tabs
     elements.navTabs.forEach((tab) => {
       tab.addEventListener("click", () => {
@@ -849,10 +891,18 @@
     }
   }
 
+  const DEFAULT_POSTER_SVG =
+    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='450' viewBox='0 0 300 450'%3E%3Crect width='300' height='450' fill='%23182030'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%2364748b' font-family='sans-serif' font-size='18'%3ELocandina non disponibile%3C/text%3E%3C/svg%3E";
+
   // Load Catalog Titles
-  async function loadCatalog() {
-    showLoading(true);
-    elements.emptyState.classList.add("hidden");
+  async function loadCatalog(page = 1, append = false) {
+    if (!append) {
+      state.currentPage = 1;
+      state.hasMore = true;
+      state.activeMode = "latest";
+      showLoading(true);
+      elements.emptyState.classList.add("hidden");
+    }
 
     // Manage Carousel Shelves visibility: show carousels on "all", hide on specific tabs or search
     const isHome = state.activeType === "all" && !state.activeGenre && !state.searchQuery;
@@ -860,7 +910,7 @@
       if (elements.continueSection) elements.continueSection.classList.add("hidden");
       if (elements.favoritesSection) elements.favoritesSection.classList.add("hidden");
       if (elements.watchedSection) elements.watchedSection.classList.add("hidden");
-    } else {
+    } else if (!append) {
       if (elements.continueSection && elements.continueRow && elements.continueRow.children.length > 0) {
         elements.continueSection.classList.remove("hidden");
       }
@@ -874,6 +924,8 @@
 
     // Tab "favorites"
     if (state.activeType === "favorites") {
+      state.activeMode = "favorites";
+      state.hasMore = false;
       elements.sectionTitle.textContent = "I Tuoi Preferiti";
       elements.heroSection.classList.add("hidden");
       try {
@@ -893,10 +945,14 @@
 
     // Tab "watched"
     if (state.activeType === "watched") {
+      state.activeMode = "watched";
+      state.hasMore = false;
       elements.sectionTitle.textContent = "Titoli Già Visti";
       elements.heroSection.classList.add("hidden");
       try {
-        const resp = await fetch(apiUrl(`api/history/watched?profile_id=${encodeURIComponent(state.activeProfileId)}&limit=50`));
+        const resp = await fetch(
+          apiUrl(`api/history/watched?profile_id=${encodeURIComponent(state.activeProfileId)}&limit=50`)
+        );
         if (!resp.ok) throw new Error("Watched fetch failed");
         const watched = await resp.json();
         // Normalize watched items to match catalog item structure
@@ -937,27 +993,42 @@
     elements.sectionTitle.textContent = titleText;
 
     try {
-      const url = apiUrl(`api/catalog/latest?type=${state.activeType}&source=${state.activeSource}&page=1&profile_id=${encodeURIComponent(state.activeProfileId)}`);
+      const url = apiUrl(
+        `api/catalog/latest?type=${state.activeType}&source=${state.activeSource}&page=${page}&profile_id=${encodeURIComponent(state.activeProfileId)}`
+      );
       const resp = await fetch(url);
       if (!resp.ok) throw new Error("Network response was not ok");
       const data = await resp.json();
-      state.catalogItems = data.results || [];
-      renderGrid(state.catalogItems);
-      if (isHome && state.catalogItems.length > 0) {
-        updateHero(state.catalogItems[0]);
+      const results = data.results || [];
+
+      if (results.length < 10) {
+        state.hasMore = false;
+      }
+
+      if (append) {
+        state.catalogItems = state.catalogItems.concat(results);
+        appendGridItems(results);
       } else {
-        elements.heroSection.classList.add("hidden");
+        state.catalogItems = results;
+        renderGrid(state.catalogItems);
+        if (isHome && state.catalogItems.length > 0) {
+          updateHero(state.catalogItems[0]);
+        } else {
+          elements.heroSection.classList.add("hidden");
+        }
       }
     } catch (err) {
       console.error("Error loading catalog:", err);
       showToast("Errore nel caricamento del catalogo", "error");
     } finally {
-      showLoading(false);
+      if (!append) showLoading(false);
     }
   }
 
   // Search
   async function executeSearch(query) {
+    state.activeMode = "search";
+    state.hasMore = false;
     showLoading(true);
     elements.emptyState.classList.add("hidden");
     elements.heroSection.classList.add("hidden");
@@ -968,7 +1039,9 @@
     elements.sectionTitle.textContent = `Risultati per "${query}"`;
 
     try {
-      const url = apiUrl(`api/catalog/search?q=${encodeURIComponent(query)}&type=${state.activeType}&source=${state.activeSource}&profile_id=${encodeURIComponent(state.activeProfileId)}`);
+      const url = apiUrl(
+        `api/catalog/search?q=${encodeURIComponent(query)}&type=${state.activeType}&source=${state.activeSource}&profile_id=${encodeURIComponent(state.activeProfileId)}`
+      );
       const resp = await fetch(url);
       if (!resp.ok) throw new Error("Search failed");
       const data = await resp.json();
@@ -983,30 +1056,157 @@
   }
 
   // Load by Genre
-  async function loadByGenre(genre) {
-    showLoading(true);
-    elements.emptyState.classList.add("hidden");
-    elements.heroSection.classList.add("hidden");
-    if (elements.continueSection) elements.continueSection.classList.add("hidden");
-    if (elements.favoritesSection) elements.favoritesSection.classList.add("hidden");
-    if (elements.watchedSection) elements.watchedSection.classList.add("hidden");
+  async function loadByGenre(genre, page = 1, append = false) {
+    if (!append) {
+      state.currentPage = 1;
+      state.hasMore = true;
+      state.activeGenre = genre;
+      state.activeMode = "genre";
+      showLoading(true);
+      elements.emptyState.classList.add("hidden");
+      elements.heroSection.classList.add("hidden");
+      if (elements.continueSection) elements.continueSection.classList.add("hidden");
+      if (elements.favoritesSection) elements.favoritesSection.classList.add("hidden");
+      if (elements.watchedSection) elements.watchedSection.classList.add("hidden");
+    }
 
     elements.sectionTitle.textContent = `Genere: ${genre}`;
 
     try {
       const type = state.activeType === "tv" ? "tv" : "movie";
-      const url = apiUrl(`api/catalog/genre/${encodeURIComponent(genre)}?type=${type}&source=${state.activeSource}&profile_id=${encodeURIComponent(state.activeProfileId)}`);
+      const url = apiUrl(
+        `api/catalog/genre/${encodeURIComponent(genre)}?type=${type}&source=${state.activeSource}&page=${page}&profile_id=${encodeURIComponent(state.activeProfileId)}`
+      );
       const resp = await fetch(url);
       if (!resp.ok) throw new Error("Genre fetch failed");
       const data = await resp.json();
-      state.catalogItems = data.results || [];
-      renderGrid(state.catalogItems);
+      const results = data.results || [];
+
+      if (results.length < 10) {
+        state.hasMore = false;
+      }
+
+      if (append) {
+        state.catalogItems = state.catalogItems.concat(results);
+        appendGridItems(results);
+      } else {
+        state.catalogItems = results;
+        renderGrid(state.catalogItems);
+      }
     } catch (err) {
       console.error("Error loading genre:", err);
       showToast("Errore durante il caricamento del genere", "error");
     } finally {
-      showLoading(false);
+      if (!append) showLoading(false);
     }
+  }
+
+  // Create Card Element
+  function createCardElement(item) {
+    const card = document.createElement("div");
+    card.className = "media-card";
+
+    const posterSrc = item.poster_url || DEFAULT_POSTER_SVG;
+    const isTv =
+      item.type === "tv" ||
+      !!item.seasons ||
+      (item.genres && item.genres.some((g) => g.toLowerCase().includes("serie")));
+    const typeLabel = isTv ? "Serie TV" : "Film";
+    const ratingLabel = item.rating ? `★ ${item.rating}` : "";
+    const certInfo = formatCertification(item.certification);
+    const certBadgeHtml = certInfo
+      ? `<span class="card-badge-cert ${certInfo.class}">${escapeHtml(certInfo.text)}</span>`
+      : "";
+
+    // Determine catalog badges
+    let catalogsList = [];
+    if (item.catalogs && item.catalogs.length > 0) {
+      catalogsList = item.catalogs;
+    } else if (item.sources && item.sources.length > 0) {
+      catalogsList = [...new Set(item.sources.map((s) => s.provider_id || s.provider_name))];
+    } else if (item.source_a_url || (item.id && item.id.startsWith("sc-"))) {
+      catalogsList = ["reactive"];
+    } else if (item.source_b_url || (item.id && item.id.startsWith("cb-"))) {
+      catalogsList = ["crawler"];
+    }
+
+    let catalogsHtml = "";
+    if (catalogsList.length > 0) {
+      catalogsHtml = `
+        <div class="card-catalogs">
+          ${catalogsList
+            .map((cat) => {
+              const lower = cat.toLowerCase();
+              let badgeClass = "catalog-badge";
+              let display = cat;
+
+              const matchedSource = (state.availableSources || []).find(
+                (s) => s.id.toLowerCase() === lower || (s.name && s.name.toLowerCase() === lower)
+              );
+
+              if (matchedSource && matchedSource.name) {
+                display = matchedSource.name;
+                badgeClass += ` badge-source-${matchedSource.id.toLowerCase()}`;
+              } else if (lower.includes("reactive")) {
+                badgeClass += " badge-source-reactive";
+                display = "Reattiva";
+              } else if (lower.includes("crawler")) {
+                badgeClass += " badge-source-crawler";
+                display = "Web";
+              } else {
+                badgeClass += " badge-source-generic";
+                display = cat;
+              }
+              return `<span class="${badgeClass}">${escapeHtml(display)}</span>`;
+            })
+            .join("")}
+        </div>
+      `;
+    }
+
+    // Mini streaming provider logos overlay on card
+    let miniProvidersHtml = "";
+    const avail =
+      item.streaming_availability ||
+      (item.watch_providers &&
+        (item.watch_providers["IT"] || item.watch_providers[Object.keys(item.watch_providers)[0]]));
+    let pLogos = [];
+    if (avail) {
+      const flat = avail.flatrate || [];
+      const free = avail.free || [];
+      const combined = [...flat, ...free];
+      pLogos = combined.filter((p) => p.logo_url || p.logo_path).slice(0, 3);
+    }
+    if (pLogos.length > 0) {
+      miniProvidersHtml = `
+        <div class="card-provider-logos" title="Disponibile in streaming">
+          ${pLogos.map((p) => `<img class="mini-provider-logo" src="${p.logo_url || "https://image.tmdb.org/t/p/w200" + p.logo_path}" alt="${escapeHtml(p.provider_name)}" title="${escapeHtml(p.provider_name)}">`).join("")}
+        </div>
+      `;
+    }
+
+    card.innerHTML = `
+      <div class="card-poster-wrap">
+        <img class="card-poster" src="${posterSrc}" alt="${escapeHtml(item.title)}" loading="lazy" onerror="this.onerror=null;this.src='${DEFAULT_POSTER_SVG}';">
+        <div class="card-badges">
+          <span class="card-badge-type">${typeLabel}</span>
+          ${certBadgeHtml}
+          ${ratingLabel ? `<span class="card-badge-rating">${ratingLabel}</span>` : ""}
+        </div>
+        ${miniProvidersHtml}
+      </div>
+      <div class="card-info">
+        <div class="card-title" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</div>
+        <div class="card-subtext">
+          <span>${item.year || ""}</span>
+          <span>${(item.genres && item.genres[0]) || ""}</span>
+        </div>
+        ${catalogsHtml}
+      </div>
+    `;
+
+    card.addEventListener("click", () => openDetails(item));
+    return card;
   }
 
   // Render Grid Cards
@@ -1023,105 +1223,21 @@
 
     const fragment = document.createDocumentFragment();
     items.forEach((item) => {
-      const card = document.createElement("div");
-      card.className = "media-card";
-
-      const posterSrc = item.poster_url || "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='450' viewBox='0 0 300 450'%3E%3Crect width='300' height='450' fill='%23182030'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%2364748b' font-family='sans-serif' font-size='18'%3ELocandina%3C/text%3E%3C/svg%3E";
-
-      const isTv = item.type === "tv" || !!item.seasons || (item.genres && item.genres.some((g) => g.toLowerCase().includes("serie")));
-      const typeLabel = isTv ? "Serie TV" : "Film";
-      const ratingLabel = item.rating ? `★ ${item.rating}` : "";
-      const certInfo = formatCertification(item.certification);
-      const certBadgeHtml = certInfo ? `<span class="card-badge-cert ${certInfo.class}">${escapeHtml(certInfo.text)}</span>` : "";
-
-      // Determine catalog badges
-      let catalogsList = [];
-      if (item.catalogs && item.catalogs.length > 0) {
-        catalogsList = item.catalogs;
-      } else if (item.sources && item.sources.length > 0) {
-        catalogsList = [...new Set(item.sources.map((s) => s.provider_id || s.provider_name))];
-      } else if (item.source_a_url || (item.id && item.id.startsWith("sc-"))) {
-        catalogsList = ["reactive"];
-      } else if (item.source_b_url || (item.id && item.id.startsWith("cb-"))) {
-        catalogsList = ["crawler"];
-      }
-
-      let catalogsHtml = "";
-      if (catalogsList.length > 0) {
-        catalogsHtml = `
-          <div class="card-catalogs">
-            ${catalogsList
-              .map((cat) => {
-                const lower = cat.toLowerCase();
-                let badgeClass = "catalog-badge";
-                let display = cat;
-
-                const matchedSource = (state.availableSources || []).find(
-                  (s) => s.id.toLowerCase() === lower || (s.name && s.name.toLowerCase() === lower)
-                );
-
-                if (matchedSource && matchedSource.name) {
-                  display = matchedSource.name;
-                  badgeClass += ` badge-source-${matchedSource.id.toLowerCase()}`;
-                } else if (lower.includes("reactive")) {
-                  badgeClass += " badge-source-reactive";
-                  display = "Reattiva";
-                } else if (lower.includes("crawler")) {
-                  badgeClass += " badge-source-crawler";
-                  display = "Web";
-                } else {
-                  badgeClass += " badge-source-generic";
-                  display = cat;
-                }
-                return `<span class="${badgeClass}">${escapeHtml(display)}</span>`;
-              })
-              .join("")}
-          </div>
-        `;
-      }
-
-      // Mini streaming provider logos overlay on card
-      let miniProvidersHtml = "";
-      const avail = item.streaming_availability || (item.watch_providers && (item.watch_providers["IT"] || item.watch_providers[Object.keys(item.watch_providers)[0]]));
-      let pLogos = [];
-      if (avail) {
-        const flat = avail.flatrate || [];
-        const free = avail.free || [];
-        const combined = [...flat, ...free];
-        pLogos = combined.filter((p) => p.logo_url || p.logo_path).slice(0, 3);
-      }
-      if (pLogos.length > 0) {
-        miniProvidersHtml = `
-          <div class="card-provider-logos" title="Disponibile in streaming">
-            ${pLogos.map((p) => `<img class="mini-provider-logo" src="${p.logo_url || ('https://image.tmdb.org/t/p/w200' + p.logo_path)}" alt="${escapeHtml(p.provider_name)}" title="${escapeHtml(p.provider_name)}">`).join("")}
-          </div>
-        `;
-      }
-
-      card.innerHTML = `
-        <div class="card-poster-wrap">
-          <img class="card-poster" src="${posterSrc}" alt="${escapeHtml(item.title)}" loading="lazy">
-          <div class="card-badges">
-            <span class="card-badge-type">${typeLabel}</span>
-            ${certBadgeHtml}
-            ${ratingLabel ? `<span class="card-badge-rating">${ratingLabel}</span>` : ""}
-          </div>
-          ${miniProvidersHtml}
-        </div>
-        <div class="card-info">
-          <div class="card-title" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</div>
-          <div class="card-subtext">
-            <span>${item.year || ""}</span>
-            <span>${(item.genres && item.genres[0]) || ""}</span>
-          </div>
-          ${catalogsHtml}
-        </div>
-      `;
-
-      card.addEventListener("click", () => openDetails(item));
-      fragment.appendChild(card);
+      fragment.appendChild(createCardElement(item));
     });
     elements.catalogGrid.appendChild(fragment);
+  }
+
+  function appendGridItems(newItems) {
+    if (!newItems || newItems.length === 0) return;
+    elements.emptyState.classList.add("hidden");
+
+    const fragment = document.createDocumentFragment();
+    newItems.forEach((item) => {
+      fragment.appendChild(createCardElement(item));
+    });
+    elements.catalogGrid.appendChild(fragment);
+    elements.sectionCount.textContent = `${state.catalogItems.length} titoli`;
   }
 
   // Hero Banner Update

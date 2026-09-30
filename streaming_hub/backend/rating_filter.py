@@ -82,6 +82,12 @@ RATING_MAP: dict[str, int] = {
 
 # Explicit adult / erotic keywords across Italian and English
 ADULT_KEYWORDS: set[str] = {
+    "365",
+    "fifty shades",
+    "cinquanta sfumature",
+    "nymphomaniac",
+    "kamasutra",
+    "lucia y el sexo",
     "erotico",
     "erotica",
     "erotismo",
@@ -92,6 +98,7 @@ ADULT_KEYWORDS: set[str] = {
     "pornografico",
     "pornografia",
     "porno",
+    "porn",
     "softcore",
     "hardcore",
     "hentai",
@@ -103,8 +110,10 @@ ADULT_KEYWORDS: set[str] = {
     "16+",
     "xxx",
     "sesso",
+    "sex",
     "sessual",
     "sensuale",
+    "sensual",
     "nudo",
     "nuda",
     "nudita",
@@ -115,6 +124,7 @@ ADULT_KEYWORDS: set[str] = {
     "orgia",
     "orgie",
     "orgy",
+    "scambisti",
     "scambist",
     "eroguro",
     "ecchi",
@@ -124,7 +134,8 @@ ADULT_KEYWORDS: set[str] = {
     "incesto",
     "trasgressione",
     "voyeur",
-    "feticis",
+    "fetish",
+    "feticismo",
     "passione carnale",
     "intimo",
     "rapporti intimi",
@@ -133,6 +144,25 @@ ADULT_KEYWORDS: set[str] = {
     "cinema a luci rosse",
     "pornodiva",
     "pornostar",
+    "escort",
+    "gigolo",
+    "strip",
+    "stripper",
+    "infedelta",
+    "infedeltà",
+    "tradimento",
+    "provocazione",
+    "intrigo erotico",
+    "thriller erotico",
+    "commedia erotica",
+    "bitch",
+    "lust",
+    "seduction",
+    "seduzione",
+    "desideri proibiti",
+    "desiderio proibito",
+    "peccati di famiglia",
+    "malizia",
 }
 
 # Strict adult genres that must be blocked for any profile < 18
@@ -220,6 +250,75 @@ FAMILY_FRIENDLY_KEYWORDS: set[str] = {
     "fiaba",
 }
 
+# Safe family titles and franchise names whitelist for Kids profiles
+SAFE_FAMILY_FRANCHISES: set[str] = {
+    "paw patrol",
+    "peppa pig",
+    "disney",
+    "pixar",
+    "re leone",
+    "lion king",
+    "frozen",
+    "topolino",
+    "mickey mouse",
+    "mario",
+    "super mario",
+    "pokemon",
+    "pokémon",
+    "spongebob",
+    "bluey",
+    "barbapapa",
+    "winx",
+    "me contro te",
+    "harry potter",
+    "bing",
+    "curioso come george",
+    "masha",
+    "pinga",
+    "pingu",
+    "tom and jerry",
+    "tom e jerry",
+    "looney tunes",
+    "shrek",
+    "madagascar",
+    "minions",
+    "cattivissimo me",
+    "despicable me",
+    "toy story",
+    "nemo",
+    "dory",
+    "cars",
+    "ratatouille",
+    "zootropolis",
+    "zootopia",
+    "oceania",
+    "moana",
+    "encanto",
+    "raya",
+    "coco",
+    "inside out",
+    "up",
+    "wall-e",
+    "monsters",
+    "aladdin",
+    "cenerentola",
+    "biancaneve",
+    "bella e la bestia",
+    "sirenetta",
+    "mulan",
+    "pocahontas",
+    "hercules",
+    "tarzan",
+    "bambi",
+    "dumbo",
+    "pinocchio",
+    "peter pan",
+    "alice nel paese",
+    "101 dalmatians",
+    "carica dei 101",
+    "gli aristogatti",
+}
+
 
 def get_profile_max_rating(profile: Profile | str | None) -> int:
     """Parse profile rating filter into maximum numerical age limit.
@@ -291,32 +390,38 @@ def is_title_allowed_for_profile(
 
     Enforces strict rules:
       - Profiles under 18 strictly block any adult/erotic content, adult keywords,
-        or certifications > max_allowed.
+        is_adult flags, or certifications > max_allowed.
+      - Uncertified content (certification is None) on Kids profiles (<= 6) is strictly
+        EXCLUDED unless explicit family-friendly tags or safe family titles are matched.
       - Teen profiles (<= 14) block extreme splatter, gore, excessive violence, and adult content.
       - Children profiles (<= 6) block horror, crime, thriller, psychological violence.
-      - Kids profiles (T / 0) strictly require family-friendly genres/keywords.
     """
     max_allowed = get_profile_max_rating(profile)
     if max_allowed >= 99:
         return True
 
-    # Extract title, certification, genres, and full description
+    # Extract fields
     if isinstance(title_item, dict):
         title = str(title_item.get("title") or "").lower()
         cert = str(title_item.get("certification") or "").upper().strip()
         genres = [str(g).lower().strip() for g in title_item.get("genres") or []]
         desc = str(title_item.get("description") or "").lower()
+        is_adult = bool(title_item.get("is_adult", False))
     else:
         title = str(getattr(title_item, "title", "") or "").lower()
         cert = str(getattr(title_item, "certification", "") or "").upper().strip()
         genres = [str(g).lower().strip() for g in getattr(title_item, "genres", []) or []]
         desc = str(getattr(title_item, "description", "") or "").lower()
+        is_adult = bool(getattr(title_item, "is_adult", False))
 
     genres_str = " ".join(genres)
     combined_text = f"{title} {genres_str} {desc}"
 
     # For any profile under 18: strictly block adult / erotic content
     if max_allowed < 18:
+        if is_adult:
+            return False
+
         # Check adult genres
         if any(ag in genres_str for ag in ADULT_GENRES):
             return False
@@ -342,10 +447,12 @@ def is_title_allowed_for_profile(
         if any(uk in title for uk in UNSAFE_TITLE_KEYWORDS):
             return False
 
-        # If profile is 'T' (0) - strict family / kids content only
-        if max_allowed == 0:
-            if genres and not any(fk in genres_str for fk in FAMILY_FRIENDLY_KEYWORDS):
-                return False
+        # In the absence of classification: strictly exclude UNLESS family-friendly tag or safe title is present
+        has_family_genre = any(fk in genres_str for fk in FAMILY_FRIENDLY_KEYWORDS) if genres else False
+        has_safe_franchise = any(sf in title for sf in SAFE_FAMILY_FRANCHISES)
+
+        if not (has_family_genre or has_safe_franchise):
+            return False
 
     elif max_allowed <= 14:
         # Teen profile (12+ / 14+ / PEGI 12 / PEGI 14)
@@ -368,3 +475,4 @@ def is_title_allowed_for_profile(
             return False
 
     return True
+

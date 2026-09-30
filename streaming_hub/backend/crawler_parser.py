@@ -25,12 +25,31 @@ class CrawlerCatalogParser:
         return parts[-1] if parts else hashlib.md5(url.encode()).hexdigest()[:12]
 
     @staticmethod
-    def clean_title(raw_title: str) -> tuple[str, int | None, str | None]:
-        """Clean raw title string, extracting clean title, year, and quality flag."""
+    def clean_title(raw_title: str) -> tuple[str, int | None, str | None, str | None]:
+        """Clean raw title string, extracting clean title, year, quality flag, and age certification."""
         cleaned = html.unescape(raw_title)
         # Remove common marketing suffixes
         cleaned = re.sub(r"\s*-\s*FILM GRATIS.*$", "", cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r"\s*Streaming.*$", "", cleaned, flags=re.IGNORECASE)
+
+        # Extract certification / age rating
+        certification: str | None = None
+        vm_match = re.search(
+            r"\[?(VM\s*\d{1,2}|PEGI\s*\d{1,2}|1[0-8]\+|6\+)\]?",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        if vm_match:
+            certification = vm_match.group(1).upper().replace(" ", "")
+            cleaned = re.sub(
+                r"\[?(VM\s*\d{1,2}|PEGI\s*\d{1,2}|1[0-8]\+|6\+)\]?",
+                "",
+                cleaned,
+                flags=re.IGNORECASE,
+            )
+        elif re.search(r"vietato ai minori", cleaned, flags=re.IGNORECASE):
+            certification = "VM18"
+            cleaned = re.sub(r"vietato ai minori", "", cleaned, flags=re.IGNORECASE)
 
         # Extract year
         year: int | None = None
@@ -53,23 +72,36 @@ class CrawlerCatalogParser:
         cleaned = re.sub(r"[–—−-]\s*$", "", cleaned).strip()
         cleaned = re.sub(r"\s+", " ", cleaned).strip()
 
-        return cleaned, year, quality
+        return cleaned, year, quality, certification
 
     @staticmethod
-    def parse_metadata_line(raw_meta: str) -> tuple[list[str], int | None, str | None]:
-        """Parse genre, duration, and country from metadata header line."""
+    def parse_metadata_line(raw_meta: str) -> tuple[list[str], int | None, str | None, str | None]:
+        """Parse genre, duration, country, and certification from metadata header line."""
         unescaped = html.unescape(raw_meta).replace("</span>", "").strip()
         parts = [p.strip() for p in re.split(r"[–—−-]", unescaped) if p.strip()]
 
         genres: list[str] = []
         duration: int | None = None
         country: str | None = None
+        certification: str | None = None
 
         for part in parts:
             dur_match = re.search(r"DURATA\s+(\d+)", part, flags=re.IGNORECASE)
             if dur_match:
                 with contextlib.suppress(ValueError):
                     duration = int(dur_match.group(1))
+                continue
+
+            vm_match = re.search(
+                r"\[?(VM\s*\d{1,2}|PEGI\s*\d{1,2}|1[0-8]\+|6\+)\]?",
+                part,
+                flags=re.IGNORECASE,
+            )
+            if vm_match:
+                certification = vm_match.group(1).upper().replace(" ", "")
+                continue
+            if "VIETATO AI MINORI" in part.upper():
+                certification = "VM18"
                 continue
 
             if part.upper() in (
@@ -87,7 +119,7 @@ class CrawlerCatalogParser:
             else:
                 genres.append(part.title())
 
-        return genres, duration, country
+        return genres, duration, country, certification
 
     @classmethod
     def is_tv_item(cls, title: str, url: str = "", genres: list[str] | None = None) -> bool:
@@ -132,7 +164,7 @@ class CrawlerCatalogParser:
                 continue
 
             media_id = cls.extract_media_id_from_url(movie_url)
-            clean_title, year, _ = cls.clean_title(raw_title)
+            clean_title, year, _, title_cert = cls.clean_title(raw_title)
 
             img_match = re.search(
                 r'<div class="card-image">.*?<img [^>]*src="([^"]+)"',
@@ -144,8 +176,11 @@ class CrawlerCatalogParser:
             meta_match = re.search(r"<strong[^>]*>\s*(.*?)\s*</strong>", card_html)
             genres: list[str] = []
             duration: int | None = None
+            meta_cert: str | None = None
             if meta_match:
-                genres, duration, _ = cls.parse_metadata_line(meta_match.group(1))
+                genres, duration, _, meta_cert = cls.parse_metadata_line(meta_match.group(1))
+
+            cert = title_cert or meta_cert
 
             desc_match = re.search(
                 r"<strong[^>]*>.*?</strong>(?:</span>)?\s*<br />\s*(.*?)(?:<a |</div>)",
@@ -166,6 +201,7 @@ class CrawlerCatalogParser:
                     description=description,
                     genres=genres,
                     duration=duration,
+                    certification=cert,
                     source_b_url=movie_url,
                     catalogs=["crawler"],
                     sources=[],
@@ -223,7 +259,7 @@ class CrawlerCatalogParser:
             if title_tag:
                 raw_title = title_tag.group(1)
 
-        clean_title, year, _ = cls.clean_title(raw_title)
+        clean_title, year, _, title_cert = cls.clean_title(raw_title)
 
         if not poster_url:
             og_img = re.search(r'<meta property="og:image" content="([^"]+)"', html_text)
@@ -231,18 +267,21 @@ class CrawlerCatalogParser:
                 poster_url = og_img.group(1)
 
         duration: int | None = None
+        meta_cert: str | None = None
         meta_match = re.search(
             r'<div class="ignore-css">.*?<strong[^>]*>(.*?)</strong>',
             html_text,
             re.DOTALL,
         )
         if meta_match:
-            body_genres, parsed_dur, _ = cls.parse_metadata_line(meta_match.group(1))
+            body_genres, parsed_dur, _, meta_cert = cls.parse_metadata_line(meta_match.group(1))
             if parsed_dur:
                 duration = parsed_dur
             for g in body_genres:
                 if g not in genres:
                     genres.append(g)
+
+        cert = title_cert or meta_cert
 
         desc_match = re.search(
             r'<div class="ignore-css">.*?<p>(?:<strong[^>]*>.*?</strong></p>\s*<p>)?(.*?)(?:<br\s*/?>\s*<a |</p>)',
@@ -264,6 +303,7 @@ class CrawlerCatalogParser:
             description=description,
             genres=genres,
             duration=duration,
+            certification=cert,
             source_b_url=movie_url,
             catalogs=["crawler"],
             sources=sources,
@@ -277,7 +317,7 @@ class CrawlerCatalogParser:
         sources: list[ProviderSource] = []
 
         table_match = re.search(
-            r'<table class="cbtable"[^>]*>(.*?)</table>\s*</td>',
+            r'<table class="cbtable"[^>]*>(.*?)</table>\s*td>',
             html_text,
             re.DOTALL,
         )
@@ -369,7 +409,7 @@ class CrawlerCatalogParser:
             if title_tag:
                 raw_title = title_tag.group(1)
 
-        clean_title, year, _ = cls.clean_title(raw_title)
+        clean_title, year, _, title_cert = cls.clean_title(raw_title)
 
         if not poster_url:
             og_img = re.search(r'<meta property="og:image" content="([^"]+)"', html_text)
@@ -473,6 +513,7 @@ class CrawlerCatalogParser:
             poster_url=poster_url,
             description=description,
             genres=genres,
+            certification=title_cert,
             source_b_url=series_url,
             catalogs=["crawler"],
             seasons=seasons_list,

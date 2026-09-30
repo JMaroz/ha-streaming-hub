@@ -152,6 +152,11 @@ class MediaDatabase:
                 pass
 
             try:
+                conn.execute("ALTER TABLE titles ADD COLUMN is_adult INTEGER DEFAULT 0;")
+            except Exception:
+                pass
+
+            try:
                 conn.execute("ALTER TABLE titles ADD COLUMN trakt_id INTEGER;")
             except Exception:
                 pass
@@ -195,6 +200,7 @@ class MediaDatabase:
         sources_json = json.dumps([s.to_dict() for s in getattr(item, "sources", [])])
         watch_providers_json = json.dumps(getattr(item, "watch_providers", {}) or {})
         raw_json = json.dumps(item.to_dict())
+        is_adult_val = 1 if getattr(item, "is_adult", False) else 0
 
         with self._get_connection() as conn:
             conn.execute(
@@ -202,10 +208,10 @@ class MediaDatabase:
                 INSERT INTO titles (
                     id, media_type, title, original_title, year,
                     poster_url, backdrop_url, description, genres,
-                    duration, rating, certification, cast_list, director,
+                    duration, rating, certification, is_adult, cast_list, director,
                     source_a_url, source_b_url,
                     tmdb_id, imdb_id, trakt_id, catalogs, sources, watch_providers, raw_json, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(id) DO UPDATE SET
                     title=excluded.title,
                     original_title=excluded.original_title,
@@ -217,6 +223,7 @@ class MediaDatabase:
                     duration=COALESCE(excluded.duration, titles.duration),
                     rating=COALESCE(excluded.rating, titles.rating),
                     certification=COALESCE(excluded.certification, titles.certification),
+                    is_adult=excluded.is_adult,
                     cast_list=excluded.cast_list,
                     director=COALESCE(excluded.director, titles.director),
                     source_a_url=COALESCE(excluded.source_a_url, titles.source_a_url),
@@ -243,6 +250,7 @@ class MediaDatabase:
                     getattr(item, "duration", None),
                     item.rating,
                     getattr(item, "certification", None),
+                    is_adult_val,
                     cast_json,
                     item.director,
                     getattr(item, "source_a_url", None) or getattr(item, "streamingcommunity_url", None),
@@ -299,7 +307,7 @@ class MediaDatabase:
                 chunk = keys[i : i + chunk_size]
                 placeholders = ",".join("?" * len(chunk))
                 cursor = conn.execute(
-                    f"SELECT id, certification, duration, rating, watch_providers, genres, tmdb_id, source_a_url, source_b_url, poster_url, backdrop_url FROM titles WHERE id IN ({placeholders})",
+                    f"SELECT id, certification, is_adult, duration, rating, watch_providers, genres, tmdb_id, source_a_url, source_b_url, poster_url, backdrop_url FROM titles WHERE id IN ({placeholders})",
                     chunk,
                 )
                 for row in cursor.fetchall():
@@ -308,6 +316,7 @@ class MediaDatabase:
                     if not target:
                         continue
                     cert = row["certification"]
+                    is_adult_db = bool(row["is_adult"])
                     dur = row["duration"]
                     rat = row["rating"]
                     raw_wp = row["watch_providers"]
@@ -320,6 +329,11 @@ class MediaDatabase:
                             target["certification"] = cert
                         else:
                             target.certification = cert
+                    if is_adult_db:
+                        if isinstance(target, dict):
+                            target["is_adult"] = True
+                        else:
+                            target.is_adult = True
                     if dur is not None:
                         if isinstance(target, dict):
                             if not target.get("duration"):
@@ -357,6 +371,23 @@ class MediaDatabase:
                                     target.genres = g_list
                         except Exception:
                             pass
+                    db_poster = row["poster_url"]
+                    db_backdrop = row["backdrop_url"]
+
+                    if db_poster:
+                        if isinstance(target, dict):
+                            if not target.get("poster_url"):
+                                target["poster_url"] = db_poster
+                        elif not getattr(target, "poster_url", None):
+                            target.poster_url = db_poster
+
+                    if db_backdrop:
+                        if isinstance(target, dict):
+                            if not target.get("backdrop_url"):
+                                target["backdrop_url"] = db_backdrop
+                        elif not getattr(target, "backdrop_url", None):
+                            target.backdrop_url = db_backdrop
+
                     if src_a:
                         if isinstance(target, dict) and not target.get("source_a_url"):
                             target["source_a_url"] = src_a

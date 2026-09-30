@@ -647,11 +647,14 @@ async def get_by_genre(
     """Browse catalog by genre across sources with cached database fallback/merge."""
     profile = get_profile_by_id(profile_id)
     live_items = await source_manager.get_by_genre(genre, media_type=type, source_filter=source, page=page)
-    db_items = await db.get_titles_by_genre(genre, media_type=type, limit=30)
-    if type == "tv":
-        merged = CatalogMerger.merge_tv_lists(live_items, db_items)
+    if page == 1:
+        db_items = await db.get_titles_by_genre(genre, media_type=type, limit=30)
+        if type == "tv":
+            merged = CatalogMerger.merge_tv_lists(live_items, db_items)
+        else:
+            merged = CatalogMerger.merge_movie_lists(live_items, db_items)
     else:
-        merged = CatalogMerger.merge_movie_lists(live_items, db_items)
+        merged = live_items
 
     await db.enrich_items_with_cached_metadata(merged)
     filtered = [item for item in merged if is_title_allowed_for_profile(item, profile)]

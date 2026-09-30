@@ -261,8 +261,62 @@ class HACoreClient:
         except Exception as err:
             _LOGGER.error("Error sending play_media to %s: %s", entity_id, err)
 
-        # Smart fallback: if the chosen entity failed (e.g. TV control entity returned 500),
-        # automatically try companion Cast entity (e.g. tpm191e)
+        # Fallback 1: Retrying without 'extra' dictionary if HA integration crashed on extra metadata
+        if not success:
+            _LOGGER.info("Retrying play_media on %s without extra metadata...", entity_id)
+            simple_payload = {
+                "entity_id": entity_id,
+                "media_content_id": media_url,
+                "media_content_type": mime_type,
+            }
+            try:
+                async with (
+                    aiohttp.ClientSession() as session,
+                    session.post(
+                        f"{self.base_url}/services/media_player/play_media",
+                        headers=self._get_headers(),
+                        json=simple_payload,
+                        timeout=aiohttp.ClientTimeout(total=15),
+                    ) as resp,
+                ):
+                    if resp.status in (200, 201):
+                        _LOGGER.info("play_media without extra metadata succeeded on %s!", entity_id)
+                        return True, entity_id
+                    body = await resp.text()
+                    _LOGGER.debug("Fallback without extra on %s failed status %s: %s", entity_id, resp.status, body)
+            except Exception as err:
+                _LOGGER.debug("Fallback play_media without extra error: %s", err)
+
+        # Fallback 2: Retry with generic 'url' or 'video' media_content_type
+        if not success:
+            for alt_mime in ("url", "video"):
+                _LOGGER.info("Retrying play_media on %s with media_content_type=%s...", entity_id, alt_mime)
+                alt_mime_payload = {
+                    "entity_id": entity_id,
+                    "media_content_id": media_url,
+                    "media_content_type": alt_mime,
+                }
+                try:
+                    async with (
+                        aiohttp.ClientSession() as session,
+                        session.post(
+                            f"{self.base_url}/services/media_player/play_media",
+                            headers=self._get_headers(),
+                            json=alt_mime_payload,
+                            timeout=aiohttp.ClientTimeout(total=15),
+                        ) as resp,
+                    ):
+                        if resp.status in (200, 201):
+                            _LOGGER.info(
+                                "play_media with media_content_type=%s succeeded on %s!",
+                                alt_mime,
+                                entity_id,
+                            )
+                            return True, entity_id
+                except Exception as err:
+                    _LOGGER.debug("Fallback play_media mime error: %s", err)
+
+        # Fallback 3: Smart companion cast entity fallback (e.g. tpm191e / chromecast)
         try:
             companion_players = await self.get_media_players()
             clean_target = entity_id.replace("media_player.", "").split("_")[0]
@@ -274,6 +328,7 @@ class HACoreClient:
                     and p.entity_id != entity_id
                     and (
                         clean_target in p.entity_id.lower()
+                        or clean_target in p.name.lower()
                         or "tpm" in p.entity_id.lower()
                         or "cast" in p.entity_id.lower()
                     )
