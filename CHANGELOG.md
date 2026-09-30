@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.0](https://github.com/JMaroz/streaming-hub-ha/compare/v2.1.0...v2.2.0) (2026-09-30)
+
+
+### Features
+
+* **settings:** add TMDb API key validation and watch providers cache re-enrichment ([26f4a7d](https://github.com/JMaroz/streaming-hub-ha/commit/26f4a7d4dfdc70cc01fc714e84c27127c1b7097e))
+
 ## [2.1.0](https://github.com/JMaroz/streaming-hub-ha/compare/v2.0.0...v2.1.0) (2026-09-30)
 
 
