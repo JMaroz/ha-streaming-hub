@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import logging
@@ -254,14 +255,29 @@ class StreamProxy:
         elif headers_override and "Range" in headers_override:
             upstream_headers["Range"] = headers_override["Range"]
 
-        try:
-            upstream_resp = await client.get(
-                segment_url,
-                headers=upstream_headers,
-                allow_redirects=True,
-                timeout=aiohttp.ClientTimeout(total=25),
-            )
+        upstream_resp = None
+        for attempt in range(2):
+            try:
+                upstream_resp = await client.get(
+                    segment_url,
+                    headers=upstream_headers,
+                    allow_redirects=True,
+                    timeout=aiohttp.ClientTimeout(total=25),
+                )
+                if upstream_resp.status < 500:
+                    break
+                # Upstream server error, retry once
+                upstream_resp.close()
+                await asyncio.sleep(0.3)
+            except Exception as err:
+                if attempt == 1:
+                    raise HTTPException(status_code=502, detail=f"Segment fetch error: {err}")
+                await asyncio.sleep(0.3)
 
+        if not upstream_resp:
+            raise HTTPException(status_code=502, detail="Failed to fetch segment from upstream")
+
+        try:
             status_code = upstream_resp.status
             if status_code >= 400:
                 upstream_resp.close()

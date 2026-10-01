@@ -384,6 +384,44 @@ class Profile:
 
 
 @dataclass
+class SubtitleTrack:
+    """A subtitle track representation for web player and Cast."""
+
+    id: str
+    language: str  # e.g. "it", "en"
+    label: str  # e.g. "Italiano", "English"
+    url: str  # Proxied VTT or SRT URL
+    format: str = "vtt"
+    is_default: bool = False
+    is_forced: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "id": self.id,
+            "language": self.language,
+            "label": self.label,
+            "url": self.url,
+            "format": self.format,
+            "is_default": self.is_default,
+            "is_forced": self.is_forced,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SubtitleTrack:
+        """Construct from dictionary."""
+        return cls(
+            id=str(data.get("id", "")),
+            language=str(data.get("language", "it")),
+            label=str(data.get("label", "Sottotitoli")),
+            url=str(data.get("url", "")),
+            format=str(data.get("format", "vtt")),
+            is_default=bool(data.get("is_default", False)),
+            is_forced=bool(data.get("is_forced", False)),
+        )
+
+
+@dataclass
 class ResolvedMedia:
     """A playable media stream resolved from a provider source."""
 
@@ -398,6 +436,7 @@ class ResolvedMedia:
     provider_id: str = ""
     expires_at: datetime | None = None
     headers: dict[str, str] = field(default_factory=dict)
+    subtitles: list[SubtitleTrack] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

@@ -134,6 +134,15 @@
     playerModal: document.getElementById("player-modal"),
     playerCloseBtn: document.getElementById("player-close-btn"),
     playerFullscreenBtn: document.getElementById("player-fullscreen-btn"),
+    playerSubtitlesBtn: document.getElementById("player-subtitles-btn"),
+    subtitlesMenu: document.getElementById("subtitles-menu"),
+    subtitlesList: document.getElementById("subtitles-list"),
+    nextEpisodeOverlay: document.getElementById("next-episode-overlay"),
+    nextEpTitle: document.getElementById("next-ep-title"),
+    nextEpDesc: document.getElementById("next-ep-desc"),
+    btnNextEpPlay: document.getElementById("btn-next-ep-play"),
+    btnNextEpCancel: document.getElementById("btn-next-ep-cancel"),
+    nextEpCountdown: document.getElementById("next-ep-countdown"),
     playerTitle: document.getElementById("player-title"),
     videoElement: document.getElementById("video-element"),
     playerSpinner: document.getElementById("player-spinner"),
@@ -322,6 +331,35 @@
     }
     if (elements.videoElement) {
       elements.videoElement.addEventListener("dblclick", toggleFullscreen);
+    }
+
+    // Subtitles Toggle Button
+    if (elements.playerSubtitlesBtn) {
+      elements.playerSubtitlesBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (elements.subtitlesMenu) {
+          elements.subtitlesMenu.classList.toggle("hidden");
+        }
+      });
+    }
+
+    document.addEventListener("click", (e) => {
+      if (elements.subtitlesMenu && !elements.subtitlesMenu.contains(e.target) && e.target !== elements.playerSubtitlesBtn) {
+        elements.subtitlesMenu.classList.add("hidden");
+      }
+    });
+
+    // Next Episode Actions
+    if (elements.btnNextEpPlay) {
+      elements.btnNextEpPlay.addEventListener("click", () => {
+        playPendingNextEpisode();
+      });
+    }
+
+    if (elements.btnNextEpCancel) {
+      elements.btnNextEpCancel.addEventListener("click", () => {
+        cancelPendingNextEpisode();
+      });
     }
 
     // Play Button Trigger
@@ -2231,9 +2269,242 @@
       video.play();
     }
 
+    setupSubtitles(streamUrl);
+    resetNextEpisodeState();
+
     video.ontimeupdate = () => reportWatchProgress(false);
     video.onpause = () => reportWatchProgress(true);
     video.onended = () => reportWatchProgress(true);
+  }
+
+  // Subtitle Management
+  let activeSubtitleIndex = -1;
+  let currentSubtitleTracks = [];
+
+  function renderSubtitlesMenu(tracks) {
+    if (!elements.subtitlesList) return;
+    elements.subtitlesList.innerHTML = "";
+
+    const offBtn = document.createElement("button");
+    offBtn.className = `player-dropdown-item ${activeSubtitleIndex === -1 ? "active" : ""}`;
+    offBtn.textContent = "Disattivati";
+    offBtn.addEventListener("click", () => {
+      selectSubtitleTrack(-1);
+    });
+    elements.subtitlesList.appendChild(offBtn);
+
+    tracks.forEach((track, idx) => {
+      const btn = document.createElement("button");
+      btn.className = `player-dropdown-item ${activeSubtitleIndex === idx ? "active" : ""}`;
+      btn.textContent = track.label || track.name || track.lang || `Traccia ${idx + 1}`;
+      btn.addEventListener("click", () => {
+        selectSubtitleTrack(idx, track);
+      });
+      elements.subtitlesList.appendChild(btn);
+    });
+  }
+
+  function selectSubtitleTrack(index, track = null) {
+    activeSubtitleIndex = index;
+    if (state.hls) {
+      state.hls.subtitleTrack = index;
+    }
+    const video = elements.videoElement;
+    if (video && video.textTracks) {
+      for (let i = 0; i < video.textTracks.length; i++) {
+        video.textTracks[i].mode = (i === index) ? "showing" : "disabled";
+      }
+    }
+    if (elements.subtitlesMenu) {
+      elements.subtitlesMenu.classList.add("hidden");
+    }
+    renderSubtitlesMenu(currentSubtitleTracks);
+  }
+
+  async function setupSubtitles(streamUrl) {
+    currentSubtitleTracks = [];
+    activeSubtitleIndex = -1;
+    renderSubtitlesMenu([]);
+
+    if (state.hls) {
+      state.hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, (event, data) => {
+        if (data.subtitleTracks && data.subtitleTracks.length > 0) {
+          currentSubtitleTracks = data.subtitleTracks.map((t, idx) => ({
+            id: `hls_${idx}`,
+            label: t.name || t.lang || `Sottotitoli ${idx + 1}`,
+            index: idx,
+            isHls: true,
+          }));
+          renderSubtitlesMenu(currentSubtitleTracks);
+        }
+      });
+    }
+
+    const session = state.playbackSession;
+    if (session && (session.media_id || session.title)) {
+      try {
+        const queryParams = new URLSearchParams();
+        if (session.title) queryParams.set("query", session.title);
+        if (session.season_number) queryParams.set("season", session.season_number);
+        if (session.episode_number) queryParams.set("episode", session.episode_number);
+
+        const resp = await fetch(apiUrl(`api/subtitles/search?${queryParams.toString()}`));
+        if (resp.ok) {
+          const externalTracks = await resp.json();
+          if (Array.isArray(externalTracks) && externalTracks.length > 0) {
+            const video = elements.videoElement;
+            if (video) {
+              const oldTracks = video.querySelectorAll("track");
+              oldTracks.forEach((t) => t.remove());
+
+              externalTracks.forEach((ext) => {
+                const trackEl = document.createElement("track");
+                trackEl.kind = "subtitles";
+                trackEl.label = ext.label;
+                trackEl.srclang = ext.language;
+                trackEl.src = apiUrl(ext.url.replace(/^\//, ""));
+                video.appendChild(trackEl);
+              });
+
+              currentSubtitleTracks = externalTracks.map((t, idx) => ({
+                id: t.id,
+                label: t.label,
+                index: idx,
+                isHls: false,
+              }));
+              renderSubtitlesMenu(currentSubtitleTracks);
+            }
+          }
+        }
+      } catch (_) {}
+    }
+  }
+
+  // Next Episode Binge-Watching Logic
+  let nextEpState = {
+    checked: false,
+    timer: null,
+    countdown: 10,
+    data: null,
+    cancelled: false,
+  };
+
+  function resetNextEpisodeState() {
+    if (nextEpState.timer) {
+      clearInterval(nextEpState.timer);
+    }
+    nextEpState = {
+      checked: false,
+      timer: null,
+      countdown: 10,
+      data: null,
+      cancelled: false,
+    };
+    if (elements.nextEpisodeOverlay) {
+      elements.nextEpisodeOverlay.classList.add("hidden");
+    }
+  }
+
+  async function checkNextEpisodeTrigger(curTime, durTime) {
+    const session = state.playbackSession;
+    if (!session || session.media_type !== "tv" || !session.season_number || !session.episode_number) return;
+    if (nextEpState.checked || nextEpState.cancelled) return;
+    if (durTime <= 60 || (curTime / durTime) < 0.95) return;
+
+    nextEpState.checked = true;
+    try {
+      const resp = await fetch(apiUrl(`api/catalog/next-episode/${session.media_id}/${session.season_number}/${session.episode_number}`));
+      if (!resp.ok) return;
+      const res = await resp.json();
+      if (!res.has_next || !res.next) return;
+
+      const nextEp = res.next.episode;
+      nextEpState.data = res.next;
+
+      if (elements.nextEpTitle) {
+        elements.nextEpTitle.textContent = `S${res.next.season_number}:E${res.next.episode_number} - ${nextEp.title || "Prossimo Episodio"}`;
+      }
+      if (elements.nextEpDesc) {
+        elements.nextEpDesc.textContent = nextEp.description || "";
+      }
+      if (elements.nextEpisodeOverlay) {
+        elements.nextEpisodeOverlay.classList.remove("hidden");
+      }
+
+      nextEpState.countdown = 10;
+      if (elements.nextEpCountdown) {
+        elements.nextEpCountdown.textContent = "10";
+      }
+
+      nextEpState.timer = setInterval(() => {
+        nextEpState.countdown -= 1;
+        if (elements.nextEpCountdown) {
+          elements.nextEpCountdown.textContent = String(nextEpState.countdown);
+        }
+        if (nextEpState.countdown <= 0) {
+          clearInterval(nextEpState.timer);
+          playPendingNextEpisode();
+        }
+      }, 1000);
+    } catch (_) {}
+  }
+
+  function cancelPendingNextEpisode() {
+    if (nextEpState.timer) clearInterval(nextEpState.timer);
+    nextEpState.cancelled = true;
+    if (elements.nextEpisodeOverlay) {
+      elements.nextEpisodeOverlay.classList.add("hidden");
+    }
+  }
+
+  async function playPendingNextEpisode() {
+    if (nextEpState.timer) clearInterval(nextEpState.timer);
+    if (!nextEpState.data) return;
+
+    const nextData = nextEpState.data;
+    const nextEp = nextData.episode;
+    resetNextEpisodeState();
+
+    if (!nextEp.sources || nextEp.sources.length === 0) {
+      showToast("Nessuna sorgente disponibile per il prossimo episodio", "warning");
+      return;
+    }
+
+    const firstSource = nextEp.sources[0];
+    try {
+      showLoading(true);
+      const resolveResp = await fetch(apiUrl("api/resolve"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          page_url: firstSource.page_url,
+          provider_id: firstSource.provider_id,
+          media_id: firstSource.media_id,
+          quality: firstSource.quality,
+        }),
+      });
+
+      if (!resolveResp.ok) {
+        throw new Error("Risoluzione prossimo episodio fallita");
+      }
+
+      const streamData = await resolveResp.json();
+      state.playbackSession = {
+        media_id: nextData.series_id,
+        title: `${state.selectedItem ? state.selectedItem.title : "Serie TV"} - S${nextData.season_number}E${nextData.episode_number}`,
+        media_type: "tv",
+        poster_url: nextEp.poster_url || (state.selectedItem ? state.selectedItem.poster_url : null),
+        season_number: nextData.season_number,
+        episode_number: nextData.episode_number,
+        profile_id: state.activeProfileId,
+      };
+
+      openPlayer(streamData.local_stream_url, state.playbackSession.title);
+    } catch (err) {
+      showToast(err.message || "Errore riproduzione prossimo episodio", "error");
+    } finally {
+      showLoading(false);
+    }
   }
 
   let lastProgressReportTime = 0;
@@ -2241,12 +2512,15 @@
     const video = elements.videoElement;
     const session = state.playbackSession;
     if (!video || !session || !video.currentTime) return;
-    const now = Date.now();
-    if (!force && now - lastProgressReportTime < 5000) return;
-    lastProgressReportTime = now;
 
     const curTime = Number.isFinite(video.currentTime) ? video.currentTime : 0;
     const durTime = Number.isFinite(video.duration) ? video.duration : 0;
+
+    checkNextEpisodeTrigger(curTime, durTime);
+
+    const now = Date.now();
+    if (!force && now - lastProgressReportTime < 5000) return;
+    lastProgressReportTime = now;
 
     const payload = {
       media_id: session.media_id,
@@ -2295,6 +2569,7 @@
 
   async function closePlayer() {
     await reportWatchProgress(true);
+    resetNextEpisodeState();
     state.playbackSession = null;
     if (elements.videoElement) {
       elements.videoElement.ontimeupdate = null;

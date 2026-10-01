@@ -33,6 +33,7 @@ from .sources.crawler_source import CrawlerSource
 from .sources.detector import SourceDetector
 from .sources.manager import SourceManager
 from .sources.reactive_source import ReactiveSource
+from .subtitles import SubtitleManager
 from .trakt_client import TraktClient
 from .utils import CatalogMerger
 
@@ -152,6 +153,7 @@ ha_client = HACoreClient()
 stream_proxy = StreamProxy()
 metadata_enricher = MetadataEnricher(tmdb_api_key=CONFIG.get("tmdb_api_key"))
 db = MediaDatabase()
+subtitle_manager = SubtitleManager()
 
 # Initialize Source Manager
 source_manager = SourceManager()
@@ -543,8 +545,12 @@ async def get_latest(
     source: str = Query("all"),
     page: int = Query(1, ge=1),
     profile_id: str = Query("default"),
+    year_min: int | None = Query(None),
+    year_max: int | None = Query(None),
+    min_rating: float | None = Query(None),
+    sort_by: str = Query("latest", pattern="^(latest|rating|year|alpha)$"),
 ) -> dict[str, Any]:
-    """Retrieve latest titles across enabled sources with rating filter for active profile."""
+    """Retrieve latest titles across enabled sources with rating filter, multi-criteria filters and sorting."""
     profile = get_profile_by_id(profile_id)
     max_rating = get_profile_max_rating(profile)
 
@@ -591,6 +597,22 @@ async def get_latest(
         except Exception:
             pass
 
+    # 3. Apply optional multi-criteria filters
+    if year_min is not None:
+        filtered = [item for item in filtered if (item.year or 0) >= year_min]
+    if year_max is not None:
+        filtered = [item for item in filtered if (item.year or 9999) <= year_max]
+    if min_rating is not None:
+        filtered = [item for item in filtered if (item.rating or 0.0) >= min_rating]
+
+    # 4. Apply custom sorting
+    if sort_by == "rating":
+        filtered.sort(key=lambda x: (x.rating or 0.0), reverse=True)
+    elif sort_by == "year":
+        filtered.sort(key=lambda x: (x.year or 0), reverse=True)
+    elif sort_by == "alpha":
+        filtered.sort(key=lambda x: (x.title or "").lower())
+
     results = [item.to_dict() for item in filtered]
     active_country = (getattr(profile, "country", None) or CONFIG.get("country", "IT")).upper()
     for r in results:
@@ -616,13 +638,32 @@ async def search_catalog(
     type: str = Query("all", pattern="^(all|movie|tv)$"),
     source: str = Query("all"),
     profile_id: str = Query("default"),
+    year_min: int | None = Query(None),
+    year_max: int | None = Query(None),
+    min_rating: float | None = Query(None),
+    sort_by: str = Query("latest", pattern="^(latest|rating|year|alpha)$"),
 ) -> dict[str, Any]:
-    """Search catalog by title across enabled sources filtered for active profile."""
+    """Search catalog by title across enabled sources filtered for active profile with optional sorting."""
     profile = get_profile_by_id(profile_id)
     query = q.strip()
     items = await source_manager.search(query, media_type=type, source_filter=source)
     await db.enrich_items_with_cached_metadata(items)
     filtered = [item for item in items if is_title_allowed_for_profile(item, profile)]
+
+    if year_min is not None:
+        filtered = [item for item in filtered if (item.year or 0) >= year_min]
+    if year_max is not None:
+        filtered = [item for item in filtered if (item.year or 9999) <= year_max]
+    if min_rating is not None:
+        filtered = [item for item in filtered if (item.rating or 0.0) >= min_rating]
+
+    if sort_by == "rating":
+        filtered.sort(key=lambda x: (x.rating or 0.0), reverse=True)
+    elif sort_by == "year":
+        filtered.sort(key=lambda x: (x.year or 0), reverse=True)
+    elif sort_by == "alpha":
+        filtered.sort(key=lambda x: (x.title or "").lower())
+
     results = [item.to_dict() for item in filtered]
     active_country = (getattr(profile, "country", None) or CONFIG.get("country", "IT")).upper()
     for r in results:
@@ -885,7 +926,7 @@ async def get_favorites(profile_id: str = Query("default")) -> list[dict[str, An
 
 @app.post("/api/resolve")
 async def resolve_media_source(req: ResolveRequest, request: Request) -> dict[str, Any]:
-    """Resolve a streaming source to a proxied HLS playback URL."""
+    """Resolve a streaming source to a proxied HLS playback URL with failover."""
     source = ProviderSource(
         id=f"req_{secrets_token()}",
         media_id=req.media_id or "media",
@@ -895,9 +936,21 @@ async def resolve_media_source(req: ResolveRequest, request: Request) -> dict[st
         quality=req.quality,
     )
 
+    alternate_sources: list[ProviderSource] = []
+    if req.media_id:
+        try:
+            cached_title = await db.get_title(req.media_id)
+            if cached_title and cached_title.get("sources"):
+                for s in cached_title["sources"]:
+                    if s.get("page_url") != req.page_url and s.get("available", True):
+                        alternate_sources.append(ProviderSource.from_dict(s))
+        except Exception:
+            pass
+
     try:
-        resolved = await source_manager.resolve_stream(
+        resolved = await source_manager.resolve_stream_with_fallback(
             source,
+            alternate_sources=alternate_sources,
             prefer_fhd=req.prefer_fhd,
         )
     except Exception as err:
@@ -922,6 +975,7 @@ async def resolve_media_source(req: ResolveRequest, request: Request) -> dict[st
         "local_stream_url": local_stream_url,
         "lan_stream_url": lan_stream_url,
         "headers": resolved.headers,
+        "subtitles": [s.to_dict() for s in resolved.subtitles],
     }
 
 
@@ -937,9 +991,21 @@ async def cast_to_device(req: CastRequest) -> dict[str, Any]:
         quality=req.quality,
     )
 
+    alternate_sources: list[ProviderSource] = []
+    if req.media_id:
+        try:
+            cached_title = await db.get_title(req.media_id)
+            if cached_title and cached_title.get("sources"):
+                for s in cached_title["sources"]:
+                    if s.get("page_url") != req.page_url and s.get("available", True):
+                        alternate_sources.append(ProviderSource.from_dict(s))
+        except Exception:
+            pass
+
     try:
-        resolved = await source_manager.resolve_stream(
+        resolved = await source_manager.resolve_stream_with_fallback(
             source,
+            alternate_sources=alternate_sources,
             prefer_fhd=True,
         )
     except Exception as err:
@@ -953,12 +1019,15 @@ async def cast_to_device(req: CastRequest) -> dict[str, Any]:
     lan_stream_url = f"http://{ha_host}:{stream_port}/stream/{token}"
     _LOGGER.info("Sending Cast command to %s with stream: %s", req.entity_id, lan_stream_url)
 
+    subtitles_list = [s.to_dict() for s in resolved.subtitles] if resolved.subtitles else None
+
     success, actual_entity = await ha_client.play_on_device(
         entity_id=req.entity_id,
         media_url=lan_stream_url,
         title=req.title,
         poster_url=req.poster_url,
         mime_type=resolved.mime_type or "application/vnd.apple.mpegurl",
+        subtitles=subtitles_list,
     )
 
     if not success:
@@ -966,6 +1035,21 @@ async def cast_to_device(req: CastRequest) -> dict[str, Any]:
             status_code=500,
             detail=f"Home Assistant non è riuscito ad avviare la riproduzione su {req.entity_id}",
         )
+
+    # Fire Home Assistant Core event for smart home automations
+    asyncio.create_task(
+        ha_client.fire_ha_event(
+            "streaming_hub_playback_started",
+            {
+                "title": req.title,
+                "media_type": req.media_type,
+                "entity_id": actual_entity,
+                "profile_id": req.profile_id,
+                "season_number": req.season_number,
+                "episode_number": req.episode_number,
+            },
+        )
+    )
 
     # Start active tracker to sync watch progress from Home Assistant Cast entity
     cast_profile = get_profile_by_id(req.profile_id)
@@ -996,6 +1080,52 @@ async def cast_to_device(req: CastRequest) -> dict[str, Any]:
     }
 
 
+@app.get("/api/catalog/next-episode/{series_id}/{season_number}/{episode_number}")
+async def get_next_episode_endpoint(
+    series_id: str,
+    season_number: int,
+    episode_number: int,
+) -> dict[str, Any]:
+    """Retrieve the next sequential episode for binge-watching."""
+    next_ep = await db.get_next_episode(series_id, season_number, episode_number)
+    return {"has_next": bool(next_ep), "next": next_ep}
+
+
+@app.get("/api/subtitles/search")
+async def search_subtitles_endpoint(
+    imdb_id: str | None = None,
+    tmdb_id: int | None = None,
+    query: str | None = None,
+    season: int | None = None,
+    episode: int | None = None,
+) -> list[dict[str, Any]]:
+    """Search available subtitle tracks from OpenSubtitles with fail-open fallback."""
+    tracks = await subtitle_manager.search_subtitles(
+        imdb_id=imdb_id,
+        tmdb_id=tmdb_id,
+        query=query,
+        season_number=season,
+        episode_number=episode,
+    )
+    return [t.to_dict() for t in tracks]
+
+
+@app.get("/api/subtitles/{sub_id}")
+async def get_subtitle_file_endpoint(sub_id: str) -> Response:
+    """Serve converted WebVTT subtitle file with CORS headers."""
+    vtt = subtitle_manager.get_vtt(sub_id)
+    if not vtt:
+        raise HTTPException(status_code=404, detail="Traccia sottotitoli non trovata")
+    return Response(
+        content=vtt,
+        media_type="text/vtt; charset=utf-8",
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "public, max-age=86400",
+        },
+    )
+
+
 class CastControlRequest(BaseModel):
     entity_id: str
     command: str
@@ -1012,6 +1142,13 @@ async def get_cast_status(entity_id: str | None = None) -> dict[str, Any]:
 async def control_cast(req: CastControlRequest) -> dict[str, Any]:
     """Control cast playback (play, pause, stop, seek, volume)."""
     success = await ha_client.control_cast(req.entity_id, req.command, req.value)
+    if success and req.command.lower() in ("play", "pause", "stop"):
+        asyncio.create_task(
+            ha_client.fire_ha_event(
+                f"streaming_hub_playback_{req.command.lower()}",
+                {"entity_id": req.entity_id},
+            )
+        )
     return {"success": success}
 
 

@@ -224,20 +224,37 @@ class HACoreClient:
         title: str,
         poster_url: str | None = None,
         mime_type: str = "application/vnd.apple.mpegurl",
+        subtitles: list[dict[str, Any]] | None = None,
     ) -> tuple[bool, str]:
         """Send play_media command to specified Home Assistant entity with companion fallback."""
         if not self.is_available:
             _LOGGER.error("Cannot play media: SUPERVISOR_TOKEN not configured")
             return False, entity_id
 
+        extra_dict: dict[str, Any] = {
+            "title": title,
+            "thumb": poster_url,
+        }
+        if subtitles:
+            tracks = []
+            for idx, s in enumerate(subtitles):
+                tracks.append(
+                    {
+                        "track_id": idx + 1,
+                        "type": "TEXT",
+                        "subtype": "SUBTITLES",
+                        "content_id": s.get("url"),
+                        "name": s.get("label", "Sottotitoli"),
+                        "language": s.get("language", "it"),
+                    }
+                )
+            extra_dict["tracks"] = tracks
+
         payload: dict[str, Any] = {
             "entity_id": entity_id,
             "media_content_id": media_url,
             "media_content_type": mime_type,
-            "extra": {
-                "title": title,
-                "thumb": poster_url,
-            },
+            "extra": extra_dict,
         }
 
         # Timeout 25s to allow standby TVs to turn on and launch Cast receiver
@@ -378,6 +395,25 @@ class HACoreClient:
         except Exception as err:
             _LOGGER.debug("Could not fetch state for %s: %s", entity_id, err)
         return None
+
+    async def fire_ha_event(self, event_type: str, event_data: dict[str, Any] | None = None) -> bool:
+        """Fire an event on the Home Assistant Core event bus asynchronously."""
+        if not self.is_available:
+            return False
+        try:
+            async with (
+                aiohttp.ClientSession() as session,
+                session.post(
+                    f"{self.base_url}/events/{event_type}",
+                    headers=self._get_headers(),
+                    json=event_data or {},
+                    timeout=aiohttp.ClientTimeout(total=4),
+                ) as resp,
+            ):
+                return resp.status in (200, 201)
+        except Exception as err:
+            _LOGGER.debug("Could not fire HA event %s: %s", event_type, err)
+            return False
 
     async def call_media_player_service(
         self,
@@ -664,7 +700,7 @@ class HACoreClient:
             if value is not None:
                 return await self.seek_media(entity_id, max(0.0, float(value)))
             return False
-        if cmd == "volume_set":
+        if cmd in ("volume_set", "volume"):
             if value is not None:
                 vol = max(0.0, min(1.0, float(value)))
                 return await self.call_media_player_service("volume_set", entity_id, {"volume_level": vol})

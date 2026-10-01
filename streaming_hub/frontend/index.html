@@ -321,11 +321,26 @@
           <span>Torna al catalogo</span>
         </button>
         <span id="player-title" class="player-title"></span>
-        <button id="player-fullscreen-btn" class="btn-player-fullscreen" title="Schermo intero">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path>
-          </svg>
-        </button>
+        <div class="player-header-actions">
+          <div class="player-menu-wrapper">
+            <button id="player-subtitles-btn" class="btn-player-ctrl" title="Sottotitoli">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+                <path d="M7 15h3M14 15h3M7 11h10"></path>
+              </svg>
+              <span>CC</span>
+            </button>
+            <div id="subtitles-menu" class="player-dropdown-menu hidden">
+              <div class="player-dropdown-header">Sottotitoli</div>
+              <div id="subtitles-list" class="player-dropdown-list"></div>
+            </div>
+          </div>
+          <button id="player-fullscreen-btn" class="btn-player-fullscreen" title="Schermo intero">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"></path>
+            </svg>
+          </button>
+        </div>
       </div>
 
       <div class="video-container">
@@ -333,6 +348,21 @@
         <div id="player-spinner" class="player-spinner hidden">
           <div class="spinner"></div>
           <p>Buffering flusso HLS...</p>
+        </div>
+
+        <!-- Next Episode Binge-Watching Overlay -->
+        <div id="next-episode-overlay" class="next-episode-overlay hidden">
+          <div class="next-episode-card">
+            <span class="next-ep-badge">Prossimo Episodio</span>
+            <h3 id="next-ep-title">Caricamento...</h3>
+            <p id="next-ep-desc"></p>
+            <div class="next-ep-actions">
+              <button id="btn-next-ep-play" class="btn btn-primary">
+                <span>Riproduci ora</span> (<span id="next-ep-countdown">10</span>s)
+              </button>
+              <button id="btn-next-ep-cancel" class="btn btn-secondary">Annulla</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>

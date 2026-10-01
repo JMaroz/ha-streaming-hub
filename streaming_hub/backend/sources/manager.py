@@ -207,6 +207,32 @@ class SourceManager:
 
         raise ValueError(f"No suitable source adapter could resolve {source.provider_name} ({source.page_url})")
 
+    async def resolve_stream_with_fallback(
+        self,
+        source: ProviderSource,
+        alternate_sources: list[ProviderSource] | None = None,
+        prefer_fhd: bool = True,
+    ) -> ResolvedMedia:
+        """Resolve primary source with transparent automatic failover to alternate sources on failure."""
+        sources_to_try = [source] + (alternate_sources or [])
+        last_error: Exception | None = None
+
+        for s in sources_to_try:
+            try:
+                resolved = await self.resolve_stream(s, prefer_fhd=prefer_fhd)
+                if resolved and resolved.url:
+                    return resolved
+            except Exception as err:
+                _LOGGER.info(
+                    "Source resolution failed for %s (%s): %s. Attempting failover...",
+                    s.provider_name,
+                    s.page_url,
+                    err,
+                )
+                last_error = err
+
+        raise ValueError(f"All {len(sources_to_try)} streaming sources failed to resolve: {last_error}")
+
     async def get_all_genres(self) -> list[str]:
         """Return combined unique list of genres across all active sources."""
         genres_set: set[str] = set()

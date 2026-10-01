@@ -517,6 +517,55 @@ class MediaDatabase:
                 _LOGGER.warning("Error parsing cached season %s: %s", season_id, err)
                 return None
 
+    async def get_next_episode(
+        self,
+        series_id: str,
+        season_number: int,
+        episode_number: int,
+    ) -> dict[str, Any] | None:
+        """Find the next episode in the same season or first episode of the subsequent season."""
+        async with self._lock:
+            return await asyncio.to_thread(
+                self._get_next_episode_sync,
+                series_id,
+                season_number,
+                episode_number,
+            )
+
+    def _get_next_episode_sync(
+        self,
+        series_id: str,
+        season_number: int,
+        episode_number: int,
+    ) -> dict[str, Any] | None:
+        """Synchronously determine the subsequent episode from cached seasons."""
+        # 1. Look in the current season for episode_number + 1
+        current_season = self._get_season_sync(series_id, season_number)
+        if current_season and current_season.episodes:
+            for ep in current_season.episodes:
+                if ep.episode_number == episode_number + 1:
+                    return {
+                        "series_id": series_id,
+                        "season_number": season_number,
+                        "episode_number": ep.episode_number,
+                        "episode": ep.to_dict(),
+                    }
+
+        # 2. Look in the next season for episode 1 (or lowest episode number)
+        next_season = self._get_season_sync(series_id, season_number + 1)
+        if next_season and next_season.episodes:
+            sorted_eps = sorted(next_season.episodes, key=lambda e: e.episode_number)
+            if sorted_eps:
+                target_ep = sorted_eps[0]
+                return {
+                    "series_id": series_id,
+                    "season_number": season_number + 1,
+                    "episode_number": target_ep.episode_number,
+                    "episode": target_ep.to_dict(),
+                }
+
+        return None
+
     async def save_watch_progress(
         self,
         media_id: str,
