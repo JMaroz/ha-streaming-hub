@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.3.0](https://github.com/JMaroz/streaming-hub-ha/compare/v2.2.1...v2.3.0) (2026-10-01)
+
+
+### Features
+
+* **player:** add smart subtitles, auto-next episode, failover and HA cinema events ([a1fad86](https://github.com/JMaroz/streaming-hub-ha/commit/a1fad8690f4a9a5b0a76044e491b496913c9f677))
+
+
+### Bug Fixes
+
+* **history:** restore watch progress tracking and continue watching shelf ([58cb3ea](https://github.com/JMaroz/streaming-hub-ha/commit/58cb3ea542db3cf91f66144d3ffe0ae8f107307e))
+
 ## [2.2.1](https://github.com/JMaroz/streaming-hub-ha/compare/v2.2.0...v2.2.1) (2026-09-30)
 
 
