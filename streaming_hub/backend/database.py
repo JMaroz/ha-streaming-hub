@@ -39,13 +39,18 @@ class MediaDatabase:
         self._db_path = db_path or get_db_path()
         self._lock = asyncio.Lock()
 
-    def _get_connection(self) -> sqlite3.Connection:
-        """Get a configured SQLite connection."""
+    @contextlib.contextmanager
+    def _get_connection(self) -> Any:
+        """Get a configured SQLite connection and ensure clean close."""
         conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA foreign_keys=ON;")
-        return conn
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     async def init(self) -> None:
         """Initialize tables and indexes."""
@@ -564,6 +569,8 @@ class MediaDatabase:
                 ON CONFLICT(id) DO UPDATE SET
                     progress_seconds=excluded.progress_seconds,
                     duration_seconds=excluded.duration_seconds,
+                    title=COALESCE(excluded.title, watch_history.title),
+                    poster_url=COALESCE(excluded.poster_url, watch_history.poster_url),
                     updated_at=CURRENT_TIMESTAMP;
                 """,
                 (
@@ -839,25 +846,50 @@ class MediaDatabase:
         with self._get_connection() as conn:
             conn.execute("DELETE FROM watch_history WHERE media_id = ? AND profile_id = ?", (media_id, profile_id))
 
-    async def get_media_progress(self, media_id: str, profile_id: str = "default") -> dict[str, Any] | None:
-        """Get latest watch progress for a media_id and profile."""
+    async def get_media_progress(
+        self,
+        media_id: str,
+        profile_id: str = "default",
+        season_number: int | None = None,
+        episode_number: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Get latest watch progress for a media_id and profile, optionally filtered by season and episode."""
         async with self._lock:
-            return await asyncio.to_thread(self._get_media_progress_sync, media_id, profile_id)
+            return await asyncio.to_thread(
+                self._get_media_progress_sync, media_id, profile_id, season_number, episode_number
+            )
 
-    def _get_media_progress_sync(self, media_id: str, profile_id: str) -> dict[str, Any] | None:
+    def _get_media_progress_sync(
+        self,
+        media_id: str,
+        profile_id: str,
+        season_number: int | None = None,
+        episode_number: int | None = None,
+    ) -> dict[str, Any] | None:
         """Synchronously get latest progress."""
         with self._get_connection() as conn:
-            cursor = conn.execute(
+            if season_number is not None and episode_number is not None:
+                query = """
+                    SELECT id, media_id, title, poster_url, media_type,
+                           season_number, episode_number, progress_seconds, duration_seconds, updated_at
+                    FROM watch_history
+                    WHERE media_id = ? AND profile_id = ? AND season_number = ? AND episode_number = ?
+                    ORDER BY updated_at DESC
+                    LIMIT 1;
                 """
-                SELECT id, media_id, title, poster_url, media_type,
-                       season_number, episode_number, progress_seconds, duration_seconds, updated_at
-                FROM watch_history
-                WHERE media_id = ? AND profile_id = ?
-                ORDER BY updated_at DESC
-                LIMIT 1;
-                """,
-                (media_id, profile_id),
-            )
+                params = (media_id, profile_id, season_number, episode_number)
+            else:
+                query = """
+                    SELECT id, media_id, title, poster_url, media_type,
+                           season_number, episode_number, progress_seconds, duration_seconds, updated_at
+                    FROM watch_history
+                    WHERE media_id = ? AND profile_id = ?
+                    ORDER BY updated_at DESC
+                    LIMIT 1;
+                """
+                params = (media_id, profile_id)
+
+            cursor = conn.execute(query, params)
             row = cursor.fetchone()
             return dict(row) if row else None
 

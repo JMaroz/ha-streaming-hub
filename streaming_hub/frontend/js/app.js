@@ -29,6 +29,7 @@
     hls: null,
     ingressPath: "",
     resumeProgress: null,
+    playbackSession: null,
     castSession: {
       active: false,
       entityId: null,
@@ -1670,9 +1671,12 @@
 
     // Fetch full enriched details and watch progress concurrently
     try {
+      const progUrl = (mediaType === "tv" && targetSeason && targetEpisode)
+        ? `api/history/progress/${itemId}?season=${targetSeason}&episode=${targetEpisode}&profile_id=${encodeURIComponent(state.activeProfileId)}`
+        : `api/history/progress/${itemId}?profile_id=${encodeURIComponent(state.activeProfileId)}`;
       const [detailsResp, progResp] = await Promise.all([
         fetch(apiUrl(`api/catalog/title/${mediaType}/${itemId}?profile_id=${encodeURIComponent(state.activeProfileId)}`)),
-        fetch(apiUrl(`api/history/progress/${itemId}?profile_id=${encodeURIComponent(state.activeProfileId)}`)),
+        fetch(apiUrl(progUrl)),
       ]);
 
       if (detailsResp.status === 403) {
@@ -1888,7 +1892,23 @@
         card.classList.add("active");
         state.selectedEpisode = ep;
         renderSources(ep.sources || []);
-        updatePlayButtonText();
+
+        const seriesId = state.selectedItem ? state.selectedItem.id : "";
+        if (seriesId) {
+          fetch(apiUrl(`api/history/progress/${seriesId}?season=${state.selectedSeason}&episode=${ep.episode_number}&profile_id=${encodeURIComponent(state.activeProfileId)}`))
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d) => {
+              state.resumeProgress = d && d.progress ? d.progress : null;
+              updatePlayButtonText();
+            })
+            .catch(() => {
+              state.resumeProgress = null;
+              updatePlayButtonText();
+            });
+        } else {
+          state.resumeProgress = null;
+          updatePlayButtonText();
+        }
       });
 
       elements.episodesList.appendChild(card);
@@ -1922,7 +1942,18 @@
     const isTv = state.selectedItem && (state.selectedItem.type === "tv" || !!state.selectedItem.seasons);
     const epPrefix = isTv && state.selectedEpisode ? `S${state.selectedSeason}E${state.selectedEpisode.episode_number} ` : "";
 
-    const hasResume = state.resumeProgress && state.resumeProgress.progress_seconds > 15;
+    let hasResume = false;
+    if (state.resumeProgress && state.resumeProgress.progress_seconds > 15) {
+      if (!isTv) {
+        hasResume = true;
+      } else if (
+        state.selectedEpisode &&
+        state.resumeProgress.season_number === state.selectedSeason &&
+        state.resumeProgress.episode_number === state.selectedEpisode.episode_number
+      ) {
+        hasResume = true;
+      }
+    }
     const resumeTimeStr = hasResume ? `da ${formatTime(state.resumeProgress.progress_seconds)}` : "";
 
     if (elements.btnRestartTrigger) {
@@ -1992,6 +2023,18 @@
     elements.btnPlayTrigger.disabled = true;
 
     try {
+      const currentItem = state.selectedItem;
+      const isTv = currentItem && (currentItem.type === "tv" || !!currentItem.seasons);
+      const sessionData = {
+        media_id: currentItem ? currentItem.id : source.media_id,
+        title: currentItem ? currentItem.title : title,
+        media_type: isTv ? "tv" : "movie",
+        poster_url: currentItem ? (currentItem.backdrop_url || currentItem.poster_url || "") : "",
+        season_number: isTv ? state.selectedSeason : null,
+        episode_number: (isTv && state.selectedEpisode) ? state.selectedEpisode.episode_number : null,
+        profile_id: state.activeProfileId,
+      };
+
       const payload = {
         page_url: source.page_url,
         provider_id: source.provider_id,
@@ -2012,6 +2055,7 @@
       }
 
       const streamData = await resp.json();
+      state.playbackSession = sessionData;
       closeModal();
       openPlayer(streamData.local_stream_url, title);
     } catch (err) {
@@ -2026,10 +2070,24 @@
   async function castToDevice(source, title, entityId) {
     const currentItem = state.selectedItem;
     const isTv = currentItem && (currentItem.type === "tv" || !!currentItem.seasons);
-    const hasResume = state.resumeProgress && state.resumeProgress.progress_seconds > 15;
-    const resumeSec = hasResume ? state.resumeProgress.progress_seconds : 0;
     const seasonNum = isTv ? state.selectedSeason : null;
     const epNum = (isTv && state.selectedEpisode) ? state.selectedEpisode.episode_number : null;
+
+    let hasResume = false;
+    let resumeSec = 0;
+    if (state.resumeProgress && state.resumeProgress.progress_seconds > 15) {
+      if (!isTv) {
+        hasResume = true;
+        resumeSec = state.resumeProgress.progress_seconds;
+      } else if (
+        state.resumeProgress.season_number === seasonNum &&
+        state.resumeProgress.episode_number === epNum
+      ) {
+        hasResume = true;
+        resumeSec = state.resumeProgress.progress_seconds;
+      }
+    }
+
     const mediaId = currentItem ? currentItem.id : source.media_id;
     const posterUrl = currentItem ? (currentItem.backdrop_url || currentItem.poster_url || "") : "";
 
@@ -2102,8 +2160,22 @@
     elements.playerSpinner.classList.remove("hidden");
 
     const video = elements.videoElement;
-    const hasResume = state.resumeProgress && state.resumeProgress.progress_seconds > 15;
-    const seekSec = hasResume ? state.resumeProgress.progress_seconds : 0;
+    let hasResume = false;
+    let seekSec = 0;
+    if (state.resumeProgress && state.resumeProgress.progress_seconds > 15) {
+      const isTv = state.playbackSession && state.playbackSession.media_type === "tv";
+      if (!isTv) {
+        hasResume = true;
+        seekSec = state.resumeProgress.progress_seconds;
+      } else if (
+        state.playbackSession &&
+        state.resumeProgress.season_number === state.playbackSession.season_number &&
+        state.resumeProgress.episode_number === state.playbackSession.episode_number
+      ) {
+        hasResume = true;
+        seekSec = state.resumeProgress.progress_seconds;
+      }
+    }
 
     if (window.Hls && Hls.isSupported()) {
       if (state.hls) {
@@ -2165,30 +2237,37 @@
   }
 
   let lastProgressReportTime = 0;
-  function reportWatchProgress(force = false) {
+  async function reportWatchProgress(force = false) {
     const video = elements.videoElement;
-    if (!video || !state.selectedItem || !video.currentTime) return;
+    const session = state.playbackSession;
+    if (!video || !session || !video.currentTime) return;
     const now = Date.now();
     if (!force && now - lastProgressReportTime < 5000) return;
     lastProgressReportTime = now;
 
-    const isTv = state.selectedItem.type === "tv" || !!state.selectedItem.seasons;
+    const curTime = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+    const durTime = Number.isFinite(video.duration) ? video.duration : 0;
+
     const payload = {
-      media_id: state.selectedItem.id,
-      title: state.selectedItem.title,
-      media_type: isTv ? "tv" : "movie",
-      poster_url: state.selectedItem.poster_url,
-      season_number: isTv ? state.selectedSeason : null,
-      episode_number: (isTv && state.selectedEpisode) ? state.selectedEpisode.episode_number : null,
-      progress_seconds: video.currentTime,
-      duration_seconds: video.duration || 0,
-      profile_id: state.activeProfileId,
+      media_id: session.media_id,
+      title: session.title,
+      media_type: session.media_type,
+      poster_url: session.poster_url,
+      season_number: session.season_number,
+      episode_number: session.episode_number,
+      progress_seconds: curTime,
+      duration_seconds: durTime,
+      profile_id: session.profile_id || state.activeProfileId,
     };
-    fetch(apiUrl("api/history"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }).catch(() => {});
+
+    try {
+      await fetch(apiUrl("api/history"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        keepalive: true,
+      });
+    } catch (_) {}
   }
 
   function toggleFullscreen() {
@@ -2214,8 +2293,9 @@
     }
   }
 
-  function closePlayer() {
-    reportWatchProgress(true);
+  async function closePlayer() {
+    await reportWatchProgress(true);
+    state.playbackSession = null;
     if (elements.videoElement) {
       elements.videoElement.ontimeupdate = null;
       elements.videoElement.onpause = null;
@@ -2237,6 +2317,7 @@
     elements.videoElement.load();
     elements.playerModal.classList.add("hidden");
     loadContinueWatching();
+    loadWatchedShelf();
   }
 
   function closeModal() {
@@ -2628,6 +2709,16 @@
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
       handleAppResume();
+    } else if (document.visibilityState === "hidden") {
+      if (state.playbackSession && elements.videoElement && !elements.videoElement.paused) {
+        reportWatchProgress(true);
+      }
+    }
+  });
+
+  window.addEventListener("beforeunload", () => {
+    if (state.playbackSession && elements.videoElement) {
+      reportWatchProgress(true);
     }
   });
 

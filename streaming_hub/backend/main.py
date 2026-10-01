@@ -836,9 +836,16 @@ async def delete_history_item(
 async def get_media_progress(
     media_id: str,
     profile_id: str = Query("default"),
+    season: int | None = Query(None),
+    episode: int | None = Query(None),
 ) -> dict[str, Any]:
-    """Get latest watch progress for a title and active profile."""
-    progress = await db.get_media_progress(media_id, profile_id=profile_id)
+    """Get latest watch progress for a title and active profile, optionally filtered by season and episode."""
+    progress = await db.get_media_progress(
+        media_id,
+        profile_id=profile_id,
+        season_number=season,
+        episode_number=episode,
+    )
     return {"status": "ok", "progress": progress}
 
 
