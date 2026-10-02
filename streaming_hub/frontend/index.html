@@ -350,6 +350,15 @@
           <p>Buffering flusso HLS...</p>
         </div>
 
+        <!-- Skip Intro Button -->
+        <button id="btn-skip-intro" class="btn-skip-intro hidden">
+          <span>Salta Intro</span>
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+            <polygon points="5 4 15 12 5 20 5 4"></polygon>
+            <line x1="19" y1="5" x2="19" y2="19" stroke="currentColor" stroke-width="2.5"></line>
+          </svg>
+        </button>
+
         <!-- Next Episode Binge-Watching Overlay -->
         <div id="next-episode-overlay" class="next-episode-overlay hidden">
           <div class="next-episode-card">
@@ -369,6 +378,20 @@
 
     <!-- Floating Cast Playback & Control Bar -->
     <div id="cast-bar" class="cast-bar hidden">
+      <!-- Cast Next Episode Banner -->
+      <div id="cast-next-episode-banner" class="cast-next-episode-banner hidden">
+        <div class="cast-next-ep-content">
+          <span class="cast-next-ep-label">Titoli di coda in corso</span>
+          <span id="cast-next-ep-title" class="cast-next-ep-title">Passaggio al prossimo episodio...</span>
+        </div>
+        <div class="cast-next-ep-actions">
+          <button id="btn-cast-next-play" class="btn btn-primary btn-sm">
+            <span>Riproduci ora</span> (<span id="cast-next-countdown">10</span>s)
+          </button>
+          <button id="btn-cast-next-cancel" class="btn btn-secondary btn-sm">Annulla</button>
+        </div>
+      </div>
+
       <div class="cast-bar-container">
         <!-- Left: Media Info -->
         <div class="cast-bar-media">

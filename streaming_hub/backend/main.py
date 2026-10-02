@@ -33,6 +33,7 @@ from .sources.crawler_source import CrawlerSource
 from .sources.detector import SourceDetector
 from .sources.manager import SourceManager
 from .sources.reactive_source import ReactiveSource
+from .skip_segments import SkipSegmentManager
 from .subtitles import SubtitleManager
 from .trakt_client import TraktClient
 from .utils import CatalogMerger
@@ -154,6 +155,7 @@ stream_proxy = StreamProxy()
 metadata_enricher = MetadataEnricher(tmdb_api_key=CONFIG.get("tmdb_api_key"))
 db = MediaDatabase()
 subtitle_manager = SubtitleManager()
+skip_segments_manager = SkipSegmentManager()
 
 # Initialize Source Manager
 source_manager = SourceManager()
@@ -1086,9 +1088,83 @@ async def get_next_episode_endpoint(
     season_number: int,
     episode_number: int,
 ) -> dict[str, Any]:
-    """Retrieve the next sequential episode for binge-watching."""
+    """Retrieve the next sequential episode for binge-watching with automatic season fetching."""
     next_ep = await db.get_next_episode(series_id, season_number, episode_number)
+
+    # 1. Fallback: if not in db, try to fetch current season from source_manager
+    if not next_ep:
+        try:
+            curr_season = await source_manager.get_season(series_id, season_number)
+            if curr_season and curr_season.episodes:
+                title_data = await db.get_title(series_id)
+                tmdb_id = title_data.get("tmdb_id") if title_data else None
+                if tmdb_id:
+                    await metadata_enricher.enrich_tv_season(tmdb_id, curr_season)
+                await db.save_season(series_id, curr_season)
+                next_ep = await db.get_next_episode(series_id, season_number, episode_number)
+        except Exception as err:
+            _LOGGER.debug("Could not fallback fetch season %s: %s", season_number, err)
+
+    # 2. Fallback: if still not found and this might be the end of season, fetch season_number + 1
+    if not next_ep:
+        try:
+            next_season = await source_manager.get_season(series_id, season_number + 1)
+            if next_season and next_season.episodes:
+                title_data = await db.get_title(series_id)
+                tmdb_id = title_data.get("tmdb_id") if title_data else None
+                if tmdb_id:
+                    await metadata_enricher.enrich_tv_season(tmdb_id, next_season)
+                await db.save_season(series_id, next_season)
+                next_ep = await db.get_next_episode(series_id, season_number, episode_number)
+        except Exception as err:
+            _LOGGER.debug("Could not fallback fetch next season %s: %s", season_number + 1, err)
+
+    # 3. Ensure next episode has sources populated
+    if next_ep and next_ep.get("episode"):
+        ep_dict = next_ep["episode"]
+        if not ep_dict.get("sources"):
+            target_season_num = next_ep["season_number"]
+            try:
+                target_season = await source_manager.get_season(series_id, target_season_num)
+                if target_season and target_season.episodes:
+                    await db.save_season(series_id, target_season)
+                    refreshed = await db.get_next_episode(series_id, season_number, episode_number)
+                    if refreshed:
+                        next_ep = refreshed
+            except Exception:
+                pass
+
     return {"has_next": bool(next_ep), "next": next_ep}
+
+
+@app.get("/api/catalog/skip-segments/{series_id}/{season_number}/{episode_number}")
+async def get_skip_segments_endpoint(
+    series_id: str,
+    season_number: int,
+    episode_number: int,
+    duration: float | None = Query(None),
+) -> dict[str, Any]:
+    """Retrieve intro and outro skip markers from SkipDB with local fallback."""
+    title_data = await db.get_title(series_id)
+    imdb_id = title_data.get("imdb_id") if title_data else None
+
+    if not imdb_id and title_data:
+        # Try resolving via Cinemeta if missing
+        title_name = title_data.get("title", "")
+        if title_name:
+            clean_id = await metadata_enricher._search_cinemeta_imdb_id("series", title_name)
+            if clean_id:
+                imdb_id = clean_id
+                title_data["imdb_id"] = clean_id
+                with contextlib.suppress(Exception):
+                    await db.save_title(TvSeries.from_dict(title_data))
+
+    return await skip_segments_manager.get_skip_segments(
+        imdb_id=imdb_id,
+        season_number=season_number,
+        episode_number=episode_number,
+        duration=duration,
+    )
 
 
 @app.get("/api/subtitles/search")

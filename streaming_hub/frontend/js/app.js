@@ -137,6 +137,7 @@
     playerSubtitlesBtn: document.getElementById("player-subtitles-btn"),
     subtitlesMenu: document.getElementById("subtitles-menu"),
     subtitlesList: document.getElementById("subtitles-list"),
+    btnSkipIntro: document.getElementById("btn-skip-intro"),
     nextEpisodeOverlay: document.getElementById("next-episode-overlay"),
     nextEpTitle: document.getElementById("next-ep-title"),
     nextEpDesc: document.getElementById("next-ep-desc"),
@@ -151,6 +152,11 @@
 
     // Cast Control Bar
     castBar: document.getElementById("cast-bar"),
+    castNextEpisodeBanner: document.getElementById("cast-next-episode-banner"),
+    castNextEpTitle: document.getElementById("cast-next-ep-title"),
+    btnCastNextPlay: document.getElementById("btn-cast-next-play"),
+    castNextCountdown: document.getElementById("cast-next-countdown"),
+    btnCastNextCancel: document.getElementById("btn-cast-next-cancel"),
     castBarPoster: document.getElementById("cast-bar-poster"),
     castBarTitle: document.getElementById("cast-bar-title"),
     castBarBadge: document.getElementById("cast-bar-badge"),
@@ -359,6 +365,26 @@
     if (elements.btnNextEpCancel) {
       elements.btnNextEpCancel.addEventListener("click", () => {
         cancelPendingNextEpisode();
+      });
+    }
+
+    // Skip Intro Action
+    if (elements.btnSkipIntro) {
+      elements.btnSkipIntro.addEventListener("click", () => {
+        skipIntroAction();
+      });
+    }
+
+    // Cast Next Episode Actions
+    if (elements.btnCastNextPlay) {
+      elements.btnCastNextPlay.addEventListener("click", () => {
+        playPendingCastNextEpisode();
+      });
+    }
+
+    if (elements.btnCastNextCancel) {
+      elements.btnCastNextCancel.addEventListener("click", () => {
+        cancelPendingCastNextEpisode();
       });
     }
 
@@ -1981,7 +2007,12 @@
     const epPrefix = isTv && state.selectedEpisode ? `S${state.selectedSeason}E${state.selectedEpisode.episode_number} ` : "";
 
     let hasResume = false;
-    if (state.resumeProgress && state.resumeProgress.progress_seconds > 15) {
+    if (
+      state.resumeProgress &&
+      state.selectedItem &&
+      String(state.resumeProgress.media_id) === String(state.selectedItem.id) &&
+      state.resumeProgress.progress_seconds > 15
+    ) {
       if (!isTv) {
         hasResume = true;
       } else if (
@@ -2063,14 +2094,35 @@
     try {
       const currentItem = state.selectedItem;
       const isTv = currentItem && (currentItem.type === "tv" || !!currentItem.seasons);
+      const mediaId = currentItem ? currentItem.id : source.media_id;
+      const seasonNum = isTv ? state.selectedSeason : null;
+      const epNum = (isTv && state.selectedEpisode) ? state.selectedEpisode.episode_number : null;
+
+      let resumeSec = 0;
+      if (
+        state.resumeProgress &&
+        String(state.resumeProgress.media_id) === String(mediaId) &&
+        state.resumeProgress.progress_seconds > 15
+      ) {
+        if (!isTv) {
+          resumeSec = state.resumeProgress.progress_seconds;
+        } else if (
+          state.resumeProgress.season_number === seasonNum &&
+          state.resumeProgress.episode_number === epNum
+        ) {
+          resumeSec = state.resumeProgress.progress_seconds;
+        }
+      }
+
       const sessionData = {
-        media_id: currentItem ? currentItem.id : source.media_id,
+        media_id: mediaId,
         title: currentItem ? currentItem.title : title,
         media_type: isTv ? "tv" : "movie",
         poster_url: currentItem ? (currentItem.backdrop_url || currentItem.poster_url || "") : "",
-        season_number: isTv ? state.selectedSeason : null,
-        episode_number: (isTv && state.selectedEpisode) ? state.selectedEpisode.episode_number : null,
+        season_number: seasonNum,
+        episode_number: epNum,
         profile_id: state.activeProfileId,
+        seek_seconds: resumeSec,
       };
 
       const payload = {
@@ -2110,10 +2162,15 @@
     const isTv = currentItem && (currentItem.type === "tv" || !!currentItem.seasons);
     const seasonNum = isTv ? state.selectedSeason : null;
     const epNum = (isTv && state.selectedEpisode) ? state.selectedEpisode.episode_number : null;
+    const mediaId = currentItem ? currentItem.id : source.media_id;
 
     let hasResume = false;
     let resumeSec = 0;
-    if (state.resumeProgress && state.resumeProgress.progress_seconds > 15) {
+    if (
+      state.resumeProgress &&
+      String(state.resumeProgress.media_id) === String(mediaId) &&
+      state.resumeProgress.progress_seconds > 15
+    ) {
       if (!isTv) {
         hasResume = true;
         resumeSec = state.resumeProgress.progress_seconds;
@@ -2125,8 +2182,6 @@
         resumeSec = state.resumeProgress.progress_seconds;
       }
     }
-
-    const mediaId = currentItem ? currentItem.id : source.media_id;
     const posterUrl = currentItem ? (currentItem.backdrop_url || currentItem.poster_url || "") : "";
 
     const dev = state.mediaPlayers.find((p) => p.entity_id === entityId);
@@ -2176,6 +2231,7 @@
         title: title,
         posterUrl: posterUrl,
         isTv: isTv,
+        mediaId: mediaId,
         season: seasonNum,
         episode: epNum,
         seekSeconds: resumeSec,
@@ -2198,19 +2254,26 @@
     elements.playerSpinner.classList.remove("hidden");
 
     const video = elements.videoElement;
-    let hasResume = false;
-    let seekSec = 0;
-    if (state.resumeProgress && state.resumeProgress.progress_seconds > 15) {
-      const isTv = state.playbackSession && state.playbackSession.media_type === "tv";
+    if (video) {
+      video.currentTime = 0;
+    }
+
+    const session = state.playbackSession;
+    let seekSec = (session && session.seek_seconds) ? session.seek_seconds : 0;
+    if (
+      !seekSec &&
+      state.resumeProgress &&
+      session &&
+      String(state.resumeProgress.media_id) === String(session.media_id) &&
+      state.resumeProgress.progress_seconds > 15
+    ) {
+      const isTv = session.media_type === "tv";
       if (!isTv) {
-        hasResume = true;
         seekSec = state.resumeProgress.progress_seconds;
       } else if (
-        state.playbackSession &&
-        state.resumeProgress.season_number === state.playbackSession.season_number &&
-        state.resumeProgress.episode_number === state.playbackSession.episode_number
+        state.resumeProgress.season_number === session.season_number &&
+        state.resumeProgress.episode_number === session.episode_number
       ) {
-        hasResume = true;
         seekSec = state.resumeProgress.progress_seconds;
       }
     }
@@ -2229,9 +2292,7 @@
 
       state.hls.on(Hls.Events.MANIFEST_PARSED, () => {
         elements.playerSpinner.classList.add("hidden");
-        if (seekSec > 0) {
-          video.currentTime = seekSec;
-        }
+        video.currentTime = seekSec > 0 ? seekSec : 0;
         video.play().catch((e) => console.log("Autoplay blocked:", e));
       });
 
@@ -2256,25 +2317,40 @@
       video.src = streamUrl;
       video.addEventListener("loadedmetadata", () => {
         elements.playerSpinner.classList.add("hidden");
-        if (seekSec > 0) {
-          video.currentTime = seekSec;
-        }
+        video.currentTime = seekSec > 0 ? seekSec : 0;
         video.play();
       });
     } else {
       video.src = streamUrl;
-      if (seekSec > 0) {
-        video.currentTime = seekSec;
-      }
+      video.currentTime = seekSec > 0 ? seekSec : 0;
       video.play();
     }
 
     setupSubtitles(streamUrl);
     resetNextEpisodeState();
+    resetSegmentsState();
+    if (elements.btnSkipIntro) elements.btnSkipIntro.classList.add("hidden");
+    prepareNextEpisodeAndSegments();
 
     video.ontimeupdate = () => reportWatchProgress(false);
     video.onpause = () => reportWatchProgress(true);
-    video.onended = () => reportWatchProgress(true);
+    video.onended = () => {
+      reportWatchProgress(true);
+      if (nextEpState.ready && !nextEpState.cancelled) {
+        console.log("[StreamingHub] Video reached end: transitioning to next episode");
+        playPendingNextEpisode();
+      }
+    };
+    video.ondurationchange = () => {
+      inspectChapterTracks();
+      const dur = video.duration;
+      if (dur > 60 && (!segmentsState.outro || segmentsState.outro.start === undefined)) {
+        const session = state.playbackSession;
+        if (session && session.media_type === "tv" && session.season_number && session.episode_number) {
+          prepareNextEpisodeAndSegments(dur);
+        }
+      }
+    };
   }
 
   // Subtitle Management
@@ -2363,6 +2439,9 @@
                 trackEl.label = ext.label;
                 trackEl.srclang = ext.language;
                 trackEl.src = apiUrl(ext.url.replace(/^\//, ""));
+                trackEl.addEventListener("load", () => {
+                  inspectSubtitleTrackCues(trackEl.track);
+                });
                 video.appendChild(trackEl);
               });
 
@@ -2380,73 +2459,238 @@
     }
   }
 
-  // Next Episode Binge-Watching Logic
+  // Skip Segments & Next Episode Engine
+  let segmentsState = {
+    intro: null,
+    outro: null,
+    source: "none",
+    subtitleLastCueTime: null,
+    chapterOutroTime: null,
+  };
+
   let nextEpState = {
-    checked: false,
+    ready: false,
+    triggered: false,
+    cancelled: false,
     timer: null,
     countdown: 10,
     data: null,
-    cancelled: false,
   };
+
+  let castNextEpState = {
+    ready: false,
+    triggered: false,
+    cancelled: false,
+    timer: null,
+    countdown: 10,
+    data: null,
+    outroStart: null,
+  };
+
+  function resetSegmentsState() {
+    segmentsState = {
+      intro: null,
+      outro: null,
+      source: "none",
+      subtitleLastCueTime: null,
+      chapterOutroTime: null,
+    };
+    if (elements.btnSkipIntro) {
+      elements.btnSkipIntro.classList.add("hidden");
+    }
+  }
 
   function resetNextEpisodeState() {
     if (nextEpState.timer) {
       clearInterval(nextEpState.timer);
     }
     nextEpState = {
-      checked: false,
+      ready: false,
+      triggered: false,
+      cancelled: false,
       timer: null,
       countdown: 10,
       data: null,
-      cancelled: false,
     };
     if (elements.nextEpisodeOverlay) {
       elements.nextEpisodeOverlay.classList.add("hidden");
     }
   }
 
-  async function checkNextEpisodeTrigger(curTime, durTime) {
+  function resetCastNextEpisodeState() {
+    if (castNextEpState.timer) {
+      clearInterval(castNextEpState.timer);
+    }
+    castNextEpState = {
+      ready: false,
+      triggered: false,
+      cancelled: false,
+      timer: null,
+      countdown: 10,
+      data: null,
+      outroStart: null,
+    };
+    if (elements.castNextEpisodeBanner) {
+      elements.castNextEpisodeBanner.classList.add("hidden");
+    }
+  }
+
+  function inspectSubtitleTrackCues(textTrack) {
+    if (!textTrack || !textTrack.cues || textTrack.cues.length === 0) return;
+    const lastCue = textTrack.cues[textTrack.cues.length - 1];
+    if (lastCue && typeof lastCue.endTime === "number" && lastCue.endTime > 0) {
+      segmentsState.subtitleLastCueTime = lastCue.endTime;
+      console.log(`[StreamingHub] Subtitle dialog ends at: ${lastCue.endTime}s`);
+    }
+  }
+
+  function inspectChapterTracks() {
+    const video = elements.videoElement;
+    if (!video || !video.textTracks) return;
+    for (let i = 0; i < video.textTracks.length; i++) {
+      const track = video.textTracks[i];
+      if (track.kind === "chapters" && track.cues) {
+        for (let j = 0; j < track.cues.length; j++) {
+          const cue = track.cues[j];
+          const text = (cue.text || "").toLowerCase();
+          if (/credit|outro|titoli|ending/i.test(text)) {
+            segmentsState.chapterOutroTime = cue.startTime;
+            console.log(`[StreamingHub] Chapter outro detected at: ${cue.startTime}s ("${cue.text}")`);
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  async function prepareNextEpisodeAndSegments(dur = 0) {
     const session = state.playbackSession;
     if (!session || session.media_type !== "tv" || !session.season_number || !session.episode_number) return;
-    if (nextEpState.checked || nextEpState.cancelled) return;
-    if (durTime <= 60 || (curTime / durTime) < 0.95) return;
 
-    nextEpState.checked = true;
+    console.log(`[StreamingHub] Pre-fetching next episode & skip segments for ${session.media_id} S${session.season_number}E${session.episode_number}...`);
+
     try {
-      const resp = await fetch(apiUrl(`api/catalog/next-episode/${session.media_id}/${session.season_number}/${session.episode_number}`));
-      if (!resp.ok) return;
-      const res = await resp.json();
-      if (!res.has_next || !res.next) return;
+      const nextUrl = apiUrl(`api/catalog/next-episode/${encodeURIComponent(session.media_id)}/${session.season_number}/${session.episode_number}`);
+      const durParam = dur && dur > 60 ? `?duration=${Math.round(dur)}` : "";
+      const skipUrl = apiUrl(`api/catalog/skip-segments/${encodeURIComponent(session.media_id)}/${session.season_number}/${session.episode_number}${durParam}`);
 
-      const nextEp = res.next.episode;
-      nextEpState.data = res.next;
+      const [nextResp, skipResp] = await Promise.all([
+        fetch(nextUrl).catch(() => null),
+        fetch(skipUrl).catch(() => null),
+      ]);
 
-      if (elements.nextEpTitle) {
-        elements.nextEpTitle.textContent = `S${res.next.season_number}:E${res.next.episode_number} - ${nextEp.title || "Prossimo Episodio"}`;
-      }
-      if (elements.nextEpDesc) {
-        elements.nextEpDesc.textContent = nextEp.description || "";
-      }
-      if (elements.nextEpisodeOverlay) {
-        elements.nextEpisodeOverlay.classList.remove("hidden");
+      if (nextResp && nextResp.ok) {
+        const nextData = await nextResp.json();
+        if (nextData && nextData.has_next && nextData.next) {
+          nextEpState.data = nextData.next;
+          nextEpState.ready = true;
+          const ep = nextData.next.episode || {};
+          console.log(`[StreamingHub] Next episode ready: S${nextData.next.season_number}:E${nextData.next.episode_number} - "${ep.title || 'Prossimo Episodio'}"`);
+        } else {
+          console.log(`[StreamingHub] No next episode in catalog or end of series.`);
+        }
       }
 
-      nextEpState.countdown = 10;
+      if (skipResp && skipResp.ok) {
+        const skipData = await skipResp.json();
+        if (skipData && skipData.has_segments) {
+          segmentsState.intro = skipData.intro;
+          segmentsState.outro = skipData.outro;
+          segmentsState.source = skipData.source;
+          console.log(`[StreamingHub] SkipDB segments loaded:`, skipData);
+        }
+      }
+    } catch (err) {
+      console.warn("[StreamingHub] Error preparing next episode:", err);
+    }
+  }
+
+  function calculateOutroTriggerTime(durTime) {
+    if (segmentsState.outro && typeof segmentsState.outro.start === "number" && segmentsState.outro.start > 0) {
+      return segmentsState.outro.start;
+    }
+    if (segmentsState.chapterOutroTime && segmentsState.chapterOutroTime > 0) {
+      return segmentsState.chapterOutroTime;
+    }
+    if (segmentsState.subtitleLastCueTime && durTime > 120 && segmentsState.subtitleLastCueTime > durTime * 0.80) {
+      return Math.min(durTime - 15, segmentsState.subtitleLastCueTime + 5);
+    }
+    if (durTime > 60) {
+      return Math.min(durTime * 0.92, Math.max(durTime - 120, durTime * 0.85));
+    }
+    return durTime;
+  }
+
+  function checkSkipIntroTrigger(curTime) {
+    if (!elements.btnSkipIntro) return;
+    if (segmentsState.intro && typeof segmentsState.intro.start === "number" && typeof segmentsState.intro.end === "number") {
+      const inIntro = curTime >= segmentsState.intro.start && curTime < segmentsState.intro.end;
+      if (inIntro) {
+        elements.btnSkipIntro.classList.remove("hidden");
+      } else {
+        elements.btnSkipIntro.classList.add("hidden");
+      }
+    } else {
+      elements.btnSkipIntro.classList.add("hidden");
+    }
+  }
+
+  function skipIntroAction() {
+    const video = elements.videoElement;
+    if (video && segmentsState.intro && segmentsState.intro.end) {
+      video.currentTime = segmentsState.intro.end + 0.5;
+      if (elements.btnSkipIntro) elements.btnSkipIntro.classList.add("hidden");
+      showToast("Intro saltata ⏭", "info");
+    }
+  }
+
+  function checkNextEpisodeTrigger(curTime, durTime) {
+    checkSkipIntroTrigger(curTime);
+
+    const session = state.playbackSession;
+    if (!session || session.media_type !== "tv" || !session.season_number || !session.episode_number) return;
+    if (!nextEpState.ready || nextEpState.triggered || nextEpState.cancelled) return;
+    if (durTime <= 30) return;
+
+    const outroTriggerTime = calculateOutroTriggerTime(durTime);
+    if (curTime >= outroTriggerTime) {
+      console.log(`[StreamingHub] Triggering next episode at ${curTime}s (outro: ${outroTriggerTime}s, dur: ${durTime}s)`);
+      triggerNextEpisodeCountdown();
+    }
+  }
+
+  function triggerNextEpisodeCountdown() {
+    nextEpState.triggered = true;
+    const nextData = nextEpState.data;
+    if (!nextData || !nextData.episode) return;
+
+    const nextEp = nextData.episode;
+    if (elements.nextEpTitle) {
+      elements.nextEpTitle.textContent = `S${nextData.season_number}:E${nextData.episode_number} - ${nextEp.title || "Prossimo Episodio"}`;
+    }
+    if (elements.nextEpDesc) {
+      elements.nextEpDesc.textContent = nextEp.description || "";
+    }
+    if (elements.nextEpisodeOverlay) {
+      elements.nextEpisodeOverlay.classList.remove("hidden");
+    }
+
+    nextEpState.countdown = 10;
+    if (elements.nextEpCountdown) {
+      elements.nextEpCountdown.textContent = "10";
+    }
+
+    if (nextEpState.timer) clearInterval(nextEpState.timer);
+    nextEpState.timer = setInterval(() => {
+      nextEpState.countdown -= 1;
       if (elements.nextEpCountdown) {
-        elements.nextEpCountdown.textContent = "10";
+        elements.nextEpCountdown.textContent = String(nextEpState.countdown);
       }
-
-      nextEpState.timer = setInterval(() => {
-        nextEpState.countdown -= 1;
-        if (elements.nextEpCountdown) {
-          elements.nextEpCountdown.textContent = String(nextEpState.countdown);
-        }
-        if (nextEpState.countdown <= 0) {
-          clearInterval(nextEpState.timer);
-          playPendingNextEpisode();
-        }
-      }, 1000);
-    } catch (_) {}
+      if (nextEpState.countdown <= 0) {
+        clearInterval(nextEpState.timer);
+        playPendingNextEpisode();
+      }
+    }, 1000);
   }
 
   function cancelPendingNextEpisode() {
@@ -2455,6 +2699,7 @@
     if (elements.nextEpisodeOverlay) {
       elements.nextEpisodeOverlay.classList.add("hidden");
     }
+    showToast("Riproduzione automatica annullata", "info");
   }
 
   async function playPendingNextEpisode() {
@@ -2464,6 +2709,7 @@
     const nextData = nextEpState.data;
     const nextEp = nextData.episode;
     resetNextEpisodeState();
+    state.resumeProgress = null;
 
     if (!nextEp.sources || nextEp.sources.length === 0) {
       showToast("Nessuna sorgente disponibile per il prossimo episodio", "warning");
@@ -2497,6 +2743,7 @@
         season_number: nextData.season_number,
         episode_number: nextData.episode_number,
         profile_id: state.activeProfileId,
+        seek_seconds: 0,
       };
 
       openPlayer(streamData.local_stream_url, state.playbackSession.title);
@@ -2505,6 +2752,115 @@
     } finally {
       showLoading(false);
     }
+  }
+
+  // Cast Next Episode Functions (Option A)
+  async function prepareCastNextEpisode(mediaId, seasonNumber, episodeNumber, dur = 0) {
+    if (!mediaId || !seasonNumber || !episodeNumber) return;
+    try {
+      console.log(`[StreamingHub Cast] Pre-fetching next episode and segments for ${mediaId} S${seasonNumber}E${episodeNumber}...`);
+      const nextUrl = apiUrl(`api/catalog/next-episode/${encodeURIComponent(mediaId)}/${seasonNumber}/${episodeNumber}`);
+      const durParam = dur && dur > 60 ? `?duration=${Math.round(dur)}` : "";
+      const skipUrl = apiUrl(`api/catalog/skip-segments/${encodeURIComponent(mediaId)}/${seasonNumber}/${episodeNumber}${durParam}`);
+
+      const [nextResp, skipResp] = await Promise.all([
+        fetch(nextUrl).catch(() => null),
+        fetch(skipUrl).catch(() => null),
+      ]);
+
+      if (nextResp && nextResp.ok) {
+        const nextData = await nextResp.json();
+        if (nextData && nextData.has_next && nextData.next) {
+          castNextEpState.data = nextData.next;
+          castNextEpState.ready = true;
+          console.log(`[StreamingHub Cast] Next episode ready: S${nextData.next.season_number}:E${nextData.next.episode_number}`);
+        }
+      }
+
+      if (skipResp && skipResp.ok) {
+        const skipData = await skipResp.json();
+        if (skipData && skipData.outro && typeof skipData.outro.start === "number") {
+          castNextEpState.outroStart = skipData.outro.start;
+          console.log(`[StreamingHub Cast] Outro start: ${castNextEpState.outroStart}s`);
+        }
+      }
+    } catch (err) {
+      console.warn("[StreamingHub Cast] Prepare error:", err);
+    }
+  }
+
+  function checkCastNextEpisodeTrigger(curSec, durSec) {
+    if (!state.castSession.active || !state.castSession.isTv) return;
+    if (!castNextEpState.ready || castNextEpState.triggered || castNextEpState.cancelled) return;
+    if (durSec <= 30) return;
+
+    const outroTriggerTime = castNextEpState.outroStart
+      ? castNextEpState.outroStart
+      : Math.min(durSec * 0.92, Math.max(durSec - 120, durSec * 0.85));
+
+    if (curSec >= outroTriggerTime) {
+      console.log(`[StreamingHub Cast] Triggering countdown at ${curSec}s (outro: ${outroTriggerTime}s)`);
+      triggerCastNextEpisodeCountdown();
+    }
+  }
+
+  function triggerCastNextEpisodeCountdown() {
+    castNextEpState.triggered = true;
+    const nextData = castNextEpState.data;
+    if (!nextData || !nextData.episode) return;
+
+    const nextEp = nextData.episode;
+    if (elements.castNextEpTitle) {
+      elements.castNextEpTitle.textContent = `S${nextData.season_number}:E${nextData.episode_number} - ${nextEp.title || "Prossimo Episodio"}`;
+    }
+    if (elements.castNextEpisodeBanner) {
+      elements.castNextEpisodeBanner.classList.remove("hidden");
+    }
+
+    castNextEpState.countdown = 10;
+    if (elements.castNextCountdown) {
+      elements.castNextCountdown.textContent = "10";
+    }
+
+    if (castNextEpState.timer) clearInterval(castNextEpState.timer);
+    castNextEpState.timer = setInterval(() => {
+      castNextEpState.countdown -= 1;
+      if (elements.castNextCountdown) {
+        elements.castNextCountdown.textContent = String(castNextEpState.countdown);
+      }
+      if (castNextEpState.countdown <= 0) {
+        clearInterval(castNextEpState.timer);
+        playPendingCastNextEpisode();
+      }
+    }, 1000);
+  }
+
+  function cancelPendingCastNextEpisode() {
+    if (castNextEpState.timer) clearInterval(castNextEpState.timer);
+    castNextEpState.cancelled = true;
+    if (elements.castNextEpisodeBanner) {
+      elements.castNextEpisodeBanner.classList.add("hidden");
+    }
+    showToast("Passaggio al prossimo episodio su Cast annullato", "info");
+  }
+
+  async function playPendingCastNextEpisode() {
+    if (castNextEpState.timer) clearInterval(castNextEpState.timer);
+    if (!castNextEpState.data) return;
+
+    const nextData = castNextEpState.data;
+    const nextEp = nextData.episode;
+    resetCastNextEpisodeState();
+
+    if (!nextEp.sources || nextEp.sources.length === 0) {
+      showToast("Nessuna sorgente disponibile per il prossimo episodio", "warning");
+      return;
+    }
+
+    const firstSource = nextEp.sources[0];
+    const nextTitle = `${state.selectedItem ? state.selectedItem.title : "Serie TV"} - S${nextData.season_number}E${nextData.episode_number}`;
+    showToast(`Avvio ${nextTitle} su Cast...`, "info");
+    await castToDevice(firstSource, nextTitle, state.castSession.entityId);
   }
 
   let lastProgressReportTime = 0;
@@ -2570,11 +2926,16 @@
   async function closePlayer() {
     await reportWatchProgress(true);
     resetNextEpisodeState();
+    resetSegmentsState();
+    if (elements.btnSkipIntro) elements.btnSkipIntro.classList.add("hidden");
     state.playbackSession = null;
+    state.resumeProgress = null;
     if (elements.videoElement) {
+      elements.videoElement.currentTime = 0;
       elements.videoElement.ontimeupdate = null;
       elements.videoElement.onpause = null;
       elements.videoElement.onended = null;
+      elements.videoElement.ondurationchange = null;
     }
     if (document.fullscreenElement || document.webkitFullscreenElement) {
       if (document.exitFullscreen) {
@@ -2599,6 +2960,7 @@
     elements.detailsModal.classList.add("hidden");
     document.body.style.overflow = "";
     state.selectedItem = null;
+    state.resumeProgress = null;
   }
 
   function showLoading(show) {
@@ -2682,11 +3044,17 @@
     elements.castBar.classList.remove("hidden");
     document.body.classList.add("cast-active");
 
+    resetCastNextEpisodeState();
+    if (state.castSession.isTv && state.castSession.season && state.castSession.episode) {
+      prepareCastNextEpisode(initData.mediaId, initData.season, initData.episode);
+    }
+
     startCastPolling(initData.entityId);
   }
 
   function hideCastBar() {
     stopCastPolling();
+    resetCastNextEpisodeState();
     if (elements.castBar) {
       elements.castBar.classList.add("hidden");
     }
@@ -2742,6 +3110,7 @@
           state.castSession.position = state.castSession.duration;
         }
         renderCastProgressUI();
+        checkCastNextEpisodeTrigger(state.castSession.position, state.castSession.duration);
       }
     }, 1000);
 
@@ -2791,6 +3160,8 @@
       state.castSession.duration = data.media_duration || state.castSession.duration;
       state.castSession.volume = data.volume_level !== undefined ? data.volume_level : 1;
       state.castSession.muted = !!data.is_volume_muted;
+
+      checkCastNextEpisodeTrigger(state.castSession.position, state.castSession.duration);
 
       if (data.title && elements.castBarTitle) {
         elements.castBarTitle.textContent = data.title;

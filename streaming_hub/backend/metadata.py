@@ -248,7 +248,7 @@ class MetadataEnricher:
                 return None
 
             detail_url = f"{TMDB_BASE_URL}/tv/{tmdb_id}"
-            params = {"language": "it-IT", "append_to_response": "credits,content_ratings,watch/providers", **auth_params}
+            params = {"language": "it-IT", "append_to_response": "credits,content_ratings,watch/providers,external_ids", **auth_params}
             return await self._get_json(detail_url, params=params, headers=auth_headers)
         except Exception as err:
             _LOGGER.debug("TMDb fetch TV series failed for %s: %s", series.title, err)
@@ -376,6 +376,8 @@ class MetadataEnricher:
                 series.tmdb_id = int(meta["id"])
         if meta.get("imdb_id"):
             series.imdb_id = str(meta["imdb_id"])
+        elif meta.get("external_ids") and isinstance(meta["external_ids"], dict) and meta["external_ids"].get("imdb_id"):
+            series.imdb_id = str(meta["external_ids"]["imdb_id"])
 
         if meta.get("overview"):
             series.description = meta["overview"]

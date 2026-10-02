@@ -222,6 +222,68 @@ class TestWatchHistory(unittest.TestCase):
         )
         assert prog_ep3 is None
 
+    def test_progress_not_carried_over_between_shows(self) -> None:
+        """Test that switching between different movies or shows strictly isolates their progress."""
+        # Save progress for Movie A
+        asyncio.run(
+            self.db.save_watch_progress(
+                media_id="movie_A",
+                title="Movie A",
+                media_type="movie",
+                poster_url=None,
+                season_number=None,
+                episode_number=None,
+                progress_seconds=1000.0,
+                duration_seconds=3000.0,
+                profile_id="default",
+            )
+        )
+
+        # Save progress for Movie B
+        asyncio.run(
+            self.db.save_watch_progress(
+                media_id="movie_B",
+                title="Movie B",
+                media_type="movie",
+                poster_url=None,
+                season_number=None,
+                episode_number=None,
+                progress_seconds=150.0,
+                duration_seconds=4000.0,
+                profile_id="default",
+            )
+        )
+
+        # Ensure querying Movie C (never watched) returns None, NOT Movie A or B's progress
+        prog_c = asyncio.run(self.db.get_media_progress("movie_C", profile_id="default"))
+        self.assertIsNone(prog_c)
+
+        # Ensure querying Movie B returns exactly 150.0, not contaminated by Movie A
+        prog_b = asyncio.run(self.db.get_media_progress("movie_B", profile_id="default"))
+        self.assertIsNotNone(prog_b)
+        self.assertEqual(prog_b["progress_seconds"], 150.0)
+
+        # Save progress for Series X S1E1
+        asyncio.run(
+            self.db.save_watch_progress(
+                media_id="series_X",
+                title="Series X",
+                media_type="tv",
+                poster_url=None,
+                season_number=1,
+                episode_number=1,
+                progress_seconds=1200.0,
+                duration_seconds=2400.0,
+                profile_id="default",
+            )
+        )
+
+        # Ensure querying Series Y S1E1 (same season and episode, different series) returns None
+        prog_y = asyncio.run(
+            self.db.get_media_progress("series_Y", profile_id="default", season_number=1, episode_number=1)
+        )
+        self.assertIsNone(prog_y)
+
 
 if __name__ == "__main__":
     unittest.main()

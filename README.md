@@ -4,96 +4,96 @@
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
 [![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-brightgreen.svg?style=for-the-badge)](https://github.com/JMaroz/ha-streaming-hub)
 
-Repository ufficiale di **Home Assistant App** (Add-on) per **Streaming Hub**: l'hub multimediale per film e serie TV con interfaccia Ingress moderna, proxy di streaming HLS e supporto per il casting verso **Google Cast**, **Android TV** e **Smart TV**.
+Official **Home Assistant App** (Add-on) repository for **Streaming Hub**: your ultimate media hub for movies and TV series. Featuring a modern Ingress interface, HLS streaming proxy, and seamless casting support for **Google Cast**, **Android TV**, and **Smart TVs**.
 
 ---
 
-## 📱 Informazioni sull'App
+## 📱 Features
 
-**Streaming Hub** trasforma la tua istanza di Home Assistant in un centro multimediale cinematografico:
+**Streaming Hub** transforms your Home Assistant instance into a cinematic media center:
 
-- 📺 **Interfaccia Web Ingress Moderna**: Pannello laterale elegante in stile Netflix/Stremio con locandine in alta risoluzione, trame, ricerca istantanea e schede per stagioni ed episodi.
-- ⚡ **Player Integrato HLS.js**: Guarda film e serie TV direttamente dal browser del PC o dall'app mobile di Home Assistant.
-- 📡 **Casting su Dispositivi Fisici**: Trasmetti con un solo click a qualsiasi dispositivo **Chromecast**, **Google TV**, **Android TV** o **Smart TV** scoperto da Home Assistant.
-- 🛡️ **Stream Proxy con Iniezione Header**: Riscrive le playlist HLS (`.m3u8`) e inoltra i chunk video con gli header HTTP richiesti (`Referer`, `Origin`, `User-Agent`), evitando l'errore `403 Forbidden` sui dispositivi Cast fisici.
-- 🌐 **Risoluzione DoH (DNS-over-HTTPS)**: Supporto per Cloudflare, Google e Quad9 per garantire la raggiungibilità dei provider anche in caso di restrizioni o censure DNS operatore.
-- 🎨 **Metadati Arricchiti**: Integrazione automatica con l'API TMDb e fallback pubblico gratuito (Cinemeta / TVmaze) per trame, sfondi e voti.
+- 📺 **Modern Ingress Web UI**: An elegant, Netflix/Stremio-style side panel featuring high-resolution posters, plot summaries, instant search, and dedicated tabs for seasons and episodes.
+- ⚡ **Integrated HLS.js Player**: Watch your favorite movies and TV series directly from your PC browser or the Home Assistant mobile app.
+- 📡 **Universal Casting**: 1-click casting to any **Chromecast**, **Google TV**, **Android TV**, or **Smart TV** discovered by Home Assistant on your local network.
+- 🛡️ **Stream Proxy & Header Injection**: Intelligently rewrites HLS playlists (`.m3u8`) and forwards video chunks with necessary HTTP headers (`Referer`, `Origin`, `User-Agent`), completely bypassing `403 Forbidden` errors on physical Cast devices.
+- 🌐 **DoH (DNS-over-HTTPS) Resolution**: Built-in support for Cloudflare, Google, and Quad9 ensures provider reachability even against ISP-level DNS censorship or restrictions.
+- 🎨 **Enriched Metadata**: Automatic integration with the TMDb API, featuring a free public fallback (Cinemeta / TVmaze) for rich plots, background art, and ratings.
 
 ---
 
-## 📦 Installazione in Home Assistant
+## 📦 Installation in Home Assistant
 
-Segui questi semplici passaggi per installare l'App:
+Get up and running in just a few clicks:
 
-1. In Home Assistant, vai su **Impostazioni** > **Componenti aggiuntivi (App)** > **App Store**.
-2. Clicca sui **tre puntini in alto a destra** e seleziona **Repository**.
-3. Incolla l'URL di questo repository:
+1. In Home Assistant, navigate to **Settings** > **Add-ons** > **Add-on Store**.
+2. Click the **three dots in the top right corner** and select **Repositories**.
+3. Paste the URL of this repository:
    ```text
    https://github.com/JMaroz/ha-streaming-hub
    ```
-4. Clicca su **Aggiungi** e poi su **Chiudi**.
-5. Cerca **Streaming Hub** nell'elenco delle app disponibili e cliccaci sopra.
-6. Clicca su **Installa**.
-7. Una volta completata l'installazione, attiva l'opzione **Mostra nella barra laterale** e clicca su **Avvia**.
-8. Clicca su **Streaming Hub** nella barra laterale di Home Assistant per aprire l'interfaccia!
+4. Click **Add** and then **Close**.
+5. Search for **Streaming Hub** in the add-on store and select it.
+6. Click **Install**.
+7. Once installed, toggle **Show in sidebar** and click **Start**.
+8. Click on **Streaming Hub** in your Home Assistant sidebar to open the cinematic UI!
 
 ---
 
-## ⚙️ Configurazione (Architettura BYOS)
+## ⚙️ Configuration (BYOS Architecture)
 
-**Streaming Hub** adotta un'architettura **BYOS (Bring Your Own Sources)**: non include né distribuisce link o contenuti predefiniti. L'utente inserisce i propri indirizzi web nella scheda **Configurazione** dell'App:
+**Streaming Hub** embraces a **BYOS (Bring Your Own Sources)** architecture: it does not include or distribute default links or content. Users configure their own web sources directly in the Add-on's **Configuration** tab:
 
 ```yaml
 log_level: info
 custom_sources:
-  - url: "https://tuo-indirizzo-sorgente.esempio"
+  - url: "https://your-source-url.example"
     type: "auto"
 custom_dns: cloudflare
 tmdb_api_key: ""
 stream_port: 8099
 ```
 
-### Parametri di Configurazione
+### Configuration Parameters
 
-| Parametro | Tipo | Predefinito | Descrizione |
+| Parameter | Type | Default | Description |
 |---|---|---|---|
-| `log_level` | list | `info` | Livello di log dell'app (`trace`, `debug`, `info`, `warning`, `error`). |
-| `custom_sources` | list | `[]` | Array di sorgenti web dell'utente. Il tipo può essere `auto`, `reactive` o `crawler`. |
-| `custom_dns` | list | `cloudflare` | Provider DNS-over-HTTPS (`cloudflare`, `google`, `quad9`, `system`). |
-| `tmdb_api_key` | string | `""` | *(Opzionale)* Chiave API TMDb globale di fallback. |
-| `stream_port` | port | `8099` | Porta proxy HTTP per lo streaming nella rete locale (LAN). |
-| `profiles` | list | `[...]` | Profili del Family Account con filtro età (`ALL`, `18+`, `14+`, `6+`, `T`), chiavi TMDb e credenziali Trakt.tv individuali. |
+| `log_level` | list | `info` | Application log level (`trace`, `debug`, `info`, `warning`, `error`). |
+| `custom_sources` | list | `[]` | Array of your custom web sources. Type can be `auto`, `reactive`, or `crawler`. |
+| `custom_dns` | list | `cloudflare` | DNS-over-HTTPS provider (`cloudflare`, `google`, `quad9`, `system`). |
+| `tmdb_api_key` | string | `""` | *(Optional)* Global fallback TMDb API key. |
+| `stream_port` | port | `8099` | HTTP proxy port for streaming on the local network (LAN). |
+| `profiles` | list | `[...]` | Family Account profiles with age filters (`ALL`, `18+`, `14+`, `6+`, `T`), and individual TMDb/Trakt credentials. |
 
-### Family Account & Profili Famiglia
+### Family Accounts & Profiles
 
-Streaming Hub supporta profili multipli con preferenze separate:
-- **Filtro Classificazione per Età**: limita i titoli visibili in base alla classificazione (`ALL`, `18+`, `14+`, `6+`, `T`).
-- **Liste Separate per Profilo**: *Continua a guardare*, *I Tuoi Preferiti* e *Titoli Già Visti*.
-- **Integrazione TMDb e Trakt.tv per Persona**: ogni profilo può inserire la propria chiave TMDb e le proprie credenziali Trakt.tv per scrobblare la riproduzione in tempo reale.
-- **Selettore Netflix-Style**: cambio rapido profilo tramite pillola nell'header o modale *"Chi sta guardando?"*.
+Streaming Hub supports multiple profiles to keep everyone's preferences separate and safe:
+- **Age Rating Filters**: Restrict visible content based on classifications (`ALL`, `18+`, `14+`, `6+`, `T`).
+- **Isolated Watchlists**: Separate *Continue Watching*, *Favorites*, and *Watched* lists per profile.
+- **Personalized Integrations**: Each profile can have its own TMDb key and Trakt.tv credentials for real-time playback scrobbling.
+- **Netflix-Style Switcher**: Quick profile switching via the header pill or the *"Who's watching?"* modal.
 
 ```yaml
 profiles:
-  - id: "papà"
-    name: "Papà"
+  - id: "dad"
+    name: "Dad"
     avatar: 1
     rating_filter: "ALL"
     tmdb_api_key: "tmdb_key_1"
     trakt_client_id: "trakt_client_id_1"
     trakt_access_token: "trakt_token_1"
-  - id: "bimbi"
-    name: "Bimbi"
+  - id: "kids"
+    name: "Kids"
     avatar: 4
     rating_filter: "6+"
 ```
 
 ---
 
-## 🏛️ Architettura del Progetto
+## 🏛️ Project Architecture
 
 ```mermaid
 flowchart TD
-    subgraph Host["Host Home Assistant (HAOS / Supervised)"]
+    subgraph Host["Home Assistant Host (HAOS / Supervised)"]
         subgraph Supervisor["Home Assistant Supervisor"]
             ST["SUPERVISOR_TOKEN"]
             ING["Ingress Reverse Proxy"]
@@ -113,57 +113,57 @@ flowchart TD
         end
     end
 
-    User(["Utente Browser / App Mobile"]) -->|Sidebar Ingress| ING --> UI
+    User(["Browser / Mobile App User"]) -->|Sidebar Ingress| ING --> UI
     UI --> BE
     BE --> Scraper
     BE --> Proxy
     BE -->|Query media_player & Cast| API
-    Proxy -->|HLS Stream con Header Iniettati| CastDevice(["Chromecast / Smart TV (LAN)"])
-    API -.->|Comando play_media| CastDevice
+    Proxy -->|HLS Stream with Injected Headers| CastDevice(["Chromecast / Smart TV (LAN)"])
+    API -.->|play_media command| CastDevice
 ```
 
 ---
 
-## 📂 Struttura del Repository
+## 📂 Repository Structure
 
 ```text
 ha-streaming-hub/
-├── repository.yaml             # Manifest del repository di App per Home Assistant
-├── README.md                   # Documentazione principale
-├── .github/workflows/          # CI/CD GitHub Actions (Lint, build)
-├── docs/                       # Piani di migrazione e architettura
+├── repository.yaml             # Home Assistant Add-on repository manifest
+├── README.md                   # Main documentation
+├── .github/workflows/          # GitHub Actions CI/CD (Lint, build)
+├── docs/                       # Migration plans and architecture docs
 └── streaming_hub/              # Home Assistant App
-    ├── config.yaml             # Specifiche App (Ingress, Host Network, API Token)
-    ├── build.yaml              # Multi-arch build da base-python di Frenck
-    ├── Dockerfile              # Dockerfile con FFmpeg e Python
-    ├── DOCS.md                 # Documentazione integrata in HA App Store
-    ├── icon.png                # Icona dell'App
-    ├── logo.png                # Logo banner dell'App
-    ├── requirements.txt        # Dipendenze Python
-    ├── translations/           # Traduzioni per le opzioni (Italiano, Inglese)
-    ├── rootfs/                 # Setup s6-overlay v3 con script Bashio
-    ├── backend/                # Server FastAPI asincrono
-    │   ├── main.py             # Router REST e Ingress handler
-    │   ├── ha_client.py        # Client Home Assistant Core via SUPERVISOR_TOKEN
-    │   ├── engine_reactive.py  # Client e resolver per motori reattivi SPA
-    │   ├── engine_crawler.py   # Client per motori crawler HTML
-    │   ├── crawler_parser.py   # Parser HTML per cataloghi semantici
-    │   ├── proxy.py            # Proxy HLS e riscrittura playlist M3U8
-    │   ├── dns_resolver.py     # Resolver DNS-over-HTTPS (DoH)
-    │   ├── metadata.py         # Arricchitore TMDb / Cinemeta
-    │   ├── models.py           # Modelli Movie, TvSeries, Episode, Source
-    │   ├── utils.py            # Deduplicazione e unificazione cataloghi
-    │   └── providers/          # Adapter per provider video (Reactive, Maxstream, Mixdrop)
+    ├── config.yaml             # App specs (Ingress, Host Network, API Token)
+    ├── build.yaml              # Multi-arch build config
+    ├── Dockerfile              # Dockerfile featuring FFmpeg and Python
+    ├── DOCS.md                 # Integrated docs for HA Add-on Store
+    ├── icon.png                # App Icon
+    ├── logo.png                # App Logo Banner
+    ├── requirements.txt        # Python Dependencies
+    ├── translations/           # Config UI translations (EN, IT)
+    ├── rootfs/                 # s6-overlay v3 setup with Bashio scripts
+    ├── backend/                # Async FastAPI Server
+    │   ├── main.py             # REST router and Ingress handler
+    │   ├── ha_client.py        # HA Core client via SUPERVISOR_TOKEN
+    │   ├── engine_reactive.py  # Client/resolver for reactive SPA engines
+    │   ├── engine_crawler.py   # Client for HTML crawler engines
+    │   ├── crawler_parser.py   # HTML parser for semantic catalogs
+    │   ├── proxy.py            # HLS Proxy & M3U8 Playlist rewriter
+    │   ├── dns_resolver.py     # DNS-over-HTTPS (DoH) resolver
+    │   ├── metadata.py         # TMDb / Cinemeta metadata enricher
+    │   ├── models.py           # Movie, TvSeries, Episode, Source models
+    │   ├── utils.py            # Catalog unification and deduplication
+    │   └── providers/          # Video provider adapters
     └── frontend/               # Single Page Application
-        ├── index.html          # Interfaccia grafica principale
-        ├── css/style.css       # Stili cinematici dark mode con glassmorphism
-        └── js/                 # Logica UI e player HLS.js
+        ├── index.html          # Main UI
+        ├── css/style.css       # Cinematic dark mode with glassmorphism
+        └── js/                 # UI logic and HLS.js player
             ├── app.js
             └── hls.min.js
 ```
 
 ---
 
-## 📄 Licenza
+## 📄 License
 
-Rilasciato sotto licenza [MIT](LICENSE).
+Released under the [MIT License](LICENSE).
