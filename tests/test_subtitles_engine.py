@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 if "aiohttp" not in sys.modules:
     try:
@@ -72,6 +72,21 @@ Seconda linea di sottotitoli.
     def test_search_subtitles_fail_open_on_error(self) -> None:
         """Test that search_subtitles handles connection failure without raising exceptions."""
         manager = SubtitleManager()
-        # Non-mocked aiohttp in sandbox will fail connection or return empty gracefully
-        tracks = asyncio.run(manager.search_subtitles(imdb_id="tt1375666", query="Inception"))
-        assert isinstance(tracks, list)
+
+        class MockFailingSession:
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                pass
+
+            def get(self, *args: object, **kwargs: object) -> object:
+                raise Exception("Simulated connection failure")
+
+            async def __aenter__(self) -> object:
+                return self
+
+            async def __aexit__(self, *args: object) -> None:
+                pass
+
+        with patch("aiohttp.ClientSession", MockFailingSession):
+            tracks = asyncio.run(manager.search_subtitles(imdb_id="tt1375666", query="Inception"))
+            assert isinstance(tracks, list)
+            assert len(tracks) == 0

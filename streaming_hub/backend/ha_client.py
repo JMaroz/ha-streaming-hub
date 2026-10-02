@@ -189,27 +189,44 @@ class HACoreClient:
                     _LOGGER.debug("Skipping TV remote control entity: %s (%s)", entity_id, friendly_name)
                     continue
 
+                # Compute preference score for stream receivers (prefer genuine Cast receivers over remotes)
+                score = 0
+                if any(k in id_lower for k in ("cast", "chromecast", "tpm")):
+                    score += 20
+                if "app_id" in attrs:
+                    score += 10
+                if "media_content_type" in attrs:
+                    score += 5
+                # Penalize secondary / duplicate remote entities like _2, _remote, _tv_remote, _control
+                if any(id_lower.endswith(k) or f"{k}_" in id_lower for k in ("_2", "_3", "_remote", "_control")):
+                    score -= 15
+                if not any(f"_{i}" in id_lower for i in range(2, 10)):
+                    score += 5
+
                 players.append(
-                    CastDeviceInfo(
-                        entity_id=entity_id,
-                        name=friendly_name,
-                        is_cast=True,
-                        state=current_state,
-                        device_class=device_class,
+                    (
+                        CastDeviceInfo(
+                            entity_id=entity_id,
+                            name=friendly_name,
+                            is_cast=True,
+                            state=current_state,
+                            device_class=device_class,
+                        ),
+                        score,
                     )
                 )
 
-            # Deduplicate by friendly name (e.g. if multiple entities map to the same screen)
-            unique_players: dict[str, CastDeviceInfo] = {}
-            for p in players:
+            # Deduplicate by friendly name (prefer genuine Cast entities over remote controls)
+            unique_players: dict[str, tuple[CastDeviceInfo, int]] = {}
+            for p, score in players:
                 if p.name in unique_players:
-                    # Prefer explicit Cast / TPM chassis entity
-                    if any(k in p.entity_id.lower() for k in ("tpm", "cast", "chromecast")):
-                        unique_players[p.name] = p
+                    _, existing_score = unique_players[p.name]
+                    if score > existing_score:
+                        unique_players[p.name] = (p, score)
                 else:
-                    unique_players[p.name] = p
+                    unique_players[p.name] = (p, score)
 
-            final_players = list(unique_players.values())
+            final_players = [p for p, _ in unique_players.values()]
             final_players.sort(key=lambda p: p.name)
             return final_players
         except Exception as err:
@@ -304,9 +321,9 @@ class HACoreClient:
             except Exception as err:
                 _LOGGER.debug("Fallback play_media without extra error: %s", err)
 
-        # Fallback 2: Retry with generic 'url' or 'video' media_content_type
+        # Fallback 2: Retry with genuine streaming video formats (exclude 'url' which triggers Android intent failures)
         if not success:
-            for alt_mime in ("url", "video"):
+            for alt_mime in ("video/mp4", "video", "application/x-mpegURL"):
                 _LOGGER.info("Retrying play_media on %s with media_content_type=%s...", entity_id, alt_mime)
                 alt_mime_payload = {
                     "entity_id": entity_id,
@@ -333,47 +350,55 @@ class HACoreClient:
                 except Exception as err:
                     _LOGGER.debug("Fallback play_media mime error: %s", err)
 
-        # Fallback 3: Smart companion cast entity fallback (e.g. tpm191e / chromecast)
-        try:
-            companion_players = await self.get_media_players()
-            clean_target = entity_id.replace("media_player.", "").split("_")[0]
-            alt_player = next(
-                (
-                    p
-                    for p in companion_players
-                    if p.is_cast
-                    and p.entity_id != entity_id
-                    and (
-                        clean_target in p.entity_id.lower()
-                        or clean_target in p.name.lower()
-                        or "tpm" in p.entity_id.lower()
-                        or "cast" in p.entity_id.lower()
-                    )
-                ),
-                None,
-            )
-            if alt_player:
-                _LOGGER.info(
-                    "Attempting automatic fallback cast to companion device %s (%s)...",
-                    alt_player.entity_id,
-                    alt_player.name,
+        # Fallback 3: Smart companion cast entity fallback (e.g. tpm191e / chromecast / google_tv)
+        if not success:
+            try:
+                companion_players = await self.get_media_players()
+                clean_target = entity_id.replace("media_player.", "").split("_")[0]
+                base_target = entity_id
+                for suffix in ("_2", "_3", "_remote", "_tv_remote", "_tv"):
+                    if base_target.endswith(suffix):
+                        base_target = base_target[: -len(suffix)]
+                        break
+
+                alt_player = next(
+                    (
+                        p
+                        for p in companion_players
+                        if p.is_cast
+                        and p.entity_id != entity_id
+                        and (
+                            p.entity_id == base_target
+                            or clean_target in p.entity_id.lower()
+                            or clean_target in p.name.lower()
+                            or "tpm" in p.entity_id.lower()
+                            or "cast" in p.entity_id.lower()
+                        )
+                    ),
+                    None,
                 )
-                alt_payload = dict(payload)
-                alt_payload["entity_id"] = alt_player.entity_id
-                async with (
-                    aiohttp.ClientSession() as session,
-                    session.post(
-                        f"{self.base_url}/services/media_player/play_media",
-                        headers=self._get_headers(),
-                        json=alt_payload,
-                        timeout=aiohttp.ClientTimeout(total=25),
-                    ) as resp,
-                ):
-                    if resp.status in (200, 201):
-                        _LOGGER.info("Automatic fallback cast to %s succeeded!", alt_player.entity_id)
-                        return True, alt_player.entity_id
-        except Exception as alt_err:
-            _LOGGER.debug("Companion fallback cast error: %s", alt_err)
+                if alt_player:
+                    _LOGGER.info(
+                        "Attempting automatic fallback cast to companion device %s (%s)...",
+                        alt_player.entity_id,
+                        alt_player.name,
+                    )
+                    alt_payload = dict(payload)
+                    alt_payload["entity_id"] = alt_player.entity_id
+                    async with (
+                        aiohttp.ClientSession() as session,
+                        session.post(
+                            f"{self.base_url}/services/media_player/play_media",
+                            headers=self._get_headers(),
+                            json=alt_payload,
+                            timeout=aiohttp.ClientTimeout(total=25),
+                        ) as resp,
+                    ):
+                        if resp.status in (200, 201):
+                            _LOGGER.info("Automatic fallback cast to %s succeeded!", alt_player.entity_id)
+                            return True, alt_player.entity_id
+            except Exception as alt_err:
+                _LOGGER.debug("Companion fallback cast error: %s", alt_err)
 
         return False, entity_id
 

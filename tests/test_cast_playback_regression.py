@@ -89,6 +89,24 @@ class TestCastPlaybackRegression:
                     "supported_features": 128,  # Does not have FLAG_PLAY_MEDIA
                 },
             },
+            {
+                "entity_id": "media_player.google_tv_2",
+                "state": "on",
+                "attributes": {
+                    "friendly_name": "Master bedroom TV",
+                    "supported_features": 512,
+                    "device_class": "tv",
+                },
+            },
+            {
+                "entity_id": "media_player.google_tv",
+                "state": "off",
+                "attributes": {
+                    "friendly_name": "Master bedroom TV",
+                    "supported_features": 512,
+                    "app_id": None,
+                },
+            },
         ]
 
         class MockResponse:
@@ -125,8 +143,10 @@ class TestCastPlaybackRegression:
             # Allowed stream targets
             assert "media_player.living_room_tv" in entity_ids
             assert "media_player.tpm191e_chassis" in entity_ids
+            assert "media_player.google_tv" in entity_ids
 
-            # Blocked / Filtered out
+            # Blocked / Filtered out / Deduplicated remotes
+            assert "media_player.google_tv_2" not in entity_ids  # Deduplicated in favor of genuine Cast entity
             assert "media_player.kitchen_nest_mini" not in entity_ids  # Nest speaker
             assert "media_player.browser" not in entity_ids  # Browser target
             assert "media_player.bedroom_tv_remote" not in entity_ids  # No play_media feature
@@ -293,3 +313,94 @@ class TestCastPlaybackRegression:
             res_vol = asyncio.run(self.client.control_cast("media_player.tv", "volume", 0.75))
             assert res_vol
             assert executed_services[-1] == ("volume_set", {"volume_level": 0.75})
+
+    def test_play_on_device_fallback_never_uses_url_mime(self) -> None:
+        """Test that media_content_type='url' is never used as a playback fallback."""
+        captured_mimes: list[str] = []
+
+        class MockSession:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                pass
+
+            def post(self, url: str, json: dict[str, Any], **kwargs: Any) -> Any:
+                mime = json.get("media_content_type", "")
+                captured_mimes.append(mime)
+                mock_resp = AsyncMock()
+                mock_resp.status = 500
+                mock_resp.text = AsyncMock(return_value="Unsupported media type")
+                mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+                mock_resp.__aexit__ = AsyncMock(return_value=None)
+                return mock_resp
+
+            async def __aenter__(self) -> Self:
+                return self
+
+            async def __aexit__(self, *args: object) -> None:
+                pass
+
+        with (
+            patch("aiohttp.ClientSession", MockSession),
+            patch.object(self.client, "get_media_players", AsyncMock(return_value=[])),
+        ):
+            success, _ = asyncio.run(
+                self.client.play_on_device(
+                    entity_id="media_player.strict_tv",
+                    media_url="http://192.168.1.10:8099/stream/tok_test",
+                    title="Test Title",
+                )
+            )
+
+            assert not success
+            # Ensure "url" was never attempted
+            assert "url" not in captured_mimes
+            # Genuine video formats must have been attempted
+            assert any("video" in m or "mpegurl" in m.lower() for m in captured_mimes)
+
+    def test_play_on_device_companion_fallback_for_google_tv_2(self) -> None:
+        """Test that media_player.google_tv_2 falls back to companion media_player.google_tv."""
+        companion = CastDeviceInfo(
+            entity_id="media_player.google_tv",
+            name="Master bedroom TV",
+            is_cast=True,
+            state="off",
+        )
+
+        with patch.object(self.client, "get_media_players", AsyncMock(return_value=[companion])):
+            calls: list[str] = []
+
+            class MockSession:
+                def __init__(self, *args: Any, **kwargs: Any) -> None:
+                    pass
+
+                def post(self, url: str, json: dict[str, Any], **kwargs: Any) -> Any:
+                    target = json.get("entity_id", "")
+                    calls.append(target)
+                    mock_resp = AsyncMock()
+                    if target == "media_player.google_tv":
+                        mock_resp.status = 200
+                    else:
+                        mock_resp.status = 500
+
+                    mock_resp.text = AsyncMock(return_value="")
+                    mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+                    mock_resp.__aexit__ = AsyncMock(return_value=None)
+                    return mock_resp
+
+                async def __aenter__(self) -> Self:
+                    return self
+
+                async def __aexit__(self, *args: object) -> None:
+                    pass
+
+            with patch("aiohttp.ClientSession", MockSession):
+                success, entity = asyncio.run(
+                    self.client.play_on_device(
+                        entity_id="media_player.google_tv_2",
+                        media_url="http://192.168.1.10:8099/stream/tok_lioness",
+                        title="Operazione speciale: Lioness",
+                    )
+                )
+
+                assert success
+                assert entity == "media_player.google_tv"
+                assert "media_player.google_tv" in calls
