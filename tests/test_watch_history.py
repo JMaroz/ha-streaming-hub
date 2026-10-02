@@ -282,5 +282,3 @@ class TestWatchHistory:
             self.db.get_media_progress("series_Y", profile_id="default", season_number=1, episode_number=1)
         )
         assert prog_y is None
-
-

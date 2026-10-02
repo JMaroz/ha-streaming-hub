@@ -108,5 +108,3 @@ class TestSourceFailover:
 
         with pytest.raises(ValueError):
             asyncio.run(self.manager.resolve_stream_with_fallback(bad_source))
-
-

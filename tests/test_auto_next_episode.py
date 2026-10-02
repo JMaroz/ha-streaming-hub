@@ -66,5 +66,3 @@ class TestAutoNextEpisode:
         """Test that the final episode returns None when no further episodes exist."""
         res = asyncio.run(self.db.get_next_episode("series_test", 2, 1))
         assert res is None
-
-

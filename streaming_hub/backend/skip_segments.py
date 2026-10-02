@@ -65,18 +65,17 @@ class SkipSegmentManager:
         try:
             timeout = aiohttp.ClientTimeout(total=4.0)
             if self._session and not self._session.closed:
-                async with self._session.get(
-                    SKIPDB_BASE_URL, params=params, headers=headers, timeout=timeout
-                ) as resp:
+                async with self._session.get(SKIPDB_BASE_URL, params=params, headers=headers, timeout=timeout) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         result = self._parse_skipdb_response(data)
                         self._cache[cache_key] = result
                         return result
             else:
-                async with aiohttp.ClientSession(timeout=timeout) as session, session.get(
-                    SKIPDB_BASE_URL, params=params, headers=headers
-                ) as resp:
+                async with (
+                    aiohttp.ClientSession(timeout=timeout) as session,
+                    session.get(SKIPDB_BASE_URL, params=params, headers=headers) as resp,
+                ):
                     if resp.status == 200:
                         data = await resp.json()
                         result = self._parse_skipdb_response(data)

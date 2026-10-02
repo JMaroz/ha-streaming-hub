@@ -106,5 +106,3 @@ class TestRatingFilter:
         _genres, duration, _country, meta_cert = CrawlerCatalogParser.parse_metadata_line("DURATA 120m - ITALIA - VM18")
         assert meta_cert == "VM18"
         assert duration == 120
-
-

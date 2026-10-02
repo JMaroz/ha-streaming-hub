@@ -475,4 +475,3 @@ def is_title_allowed_for_profile(
             return False
 
     return True
-

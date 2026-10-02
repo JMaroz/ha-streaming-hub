@@ -610,9 +610,9 @@ async def get_latest(
 
     # 4. Apply custom sorting
     if sort_by == "rating":
-        filtered.sort(key=lambda x: (x.rating or 0.0), reverse=True)
+        filtered.sort(key=lambda x: x.rating or 0.0, reverse=True)
     elif sort_by == "year":
-        filtered.sort(key=lambda x: (x.year or 0), reverse=True)
+        filtered.sort(key=lambda x: x.year or 0, reverse=True)
     elif sort_by == "alpha":
         filtered.sort(key=lambda x: (x.title or "").lower())
 
@@ -661,9 +661,9 @@ async def search_catalog(
         filtered = [item for item in filtered if (item.rating or 0.0) >= min_rating]
 
     if sort_by == "rating":
-        filtered.sort(key=lambda x: (x.rating or 0.0), reverse=True)
+        filtered.sort(key=lambda x: x.rating or 0.0, reverse=True)
     elif sort_by == "year":
-        filtered.sort(key=lambda x: (x.year or 0), reverse=True)
+        filtered.sort(key=lambda x: x.year or 0, reverse=True)
     elif sort_by == "alpha":
         filtered.sort(key=lambda x: (x.title or "").lower())
 

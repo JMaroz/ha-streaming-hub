@@ -30,9 +30,7 @@ def srt_to_vtt(srt_text: str) -> str:
         return text
 
     # Pattern for SRT timestamps: 00:01:20,000 --> 00:01:23,500
-    timestamp_pattern = re.compile(
-        r"(\d{2}:\d{2}:\d{2}),(\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}),(\d{3})"
-    )
+    timestamp_pattern = re.compile(r"(\d{2}:\d{2}:\d{2}),(\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}),(\d{3})")
 
     def _replace_ts(match: re.Match[str]) -> str:
         return f"{match.group(1)}.{match.group(2)} --> {match.group(3)}.{match.group(4)}"

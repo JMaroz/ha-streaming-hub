@@ -293,5 +293,3 @@ class TestCastPlaybackRegression:
             res_vol = asyncio.run(self.client.control_cast("media_player.tv", "volume", 0.75))
             assert res_vol
             assert executed_services[-1] == ("volume_set", {"volume_level": 0.75})
-
-

@@ -247,7 +247,11 @@ class MetadataEnricher:
                 return None
 
             detail_url = f"{TMDB_BASE_URL}/tv/{tmdb_id}"
-            params = {"language": "it-IT", "append_to_response": "credits,content_ratings,watch/providers,external_ids", **auth_params}
+            params = {
+                "language": "it-IT",
+                "append_to_response": "credits,content_ratings,watch/providers,external_ids",
+                **auth_params,
+            }
             return await self._get_json(detail_url, params=params, headers=auth_headers)
         except Exception as err:
             _LOGGER.debug("TMDb fetch TV series failed for %s: %s", series.title, err)
@@ -335,7 +339,14 @@ class MetadataEnricher:
             movie.certification = str(meta["certification"])
 
         # Check adult flag and certification
-        if meta.get("adult") or meta.get("is_adult") or (movie.certification and movie.certification.upper().strip() in ("VM18", "VM 18", "18+", "+18", "NC-17", "PEGI 18", "XXX")):
+        if (
+            meta.get("adult")
+            or meta.get("is_adult")
+            or (
+                movie.certification
+                and movie.certification.upper().strip() in ("VM18", "VM 18", "18+", "+18", "NC-17", "PEGI 18", "XXX")
+            )
+        ):
             movie.is_adult = True
 
         if meta.get("genres"):
@@ -347,7 +358,22 @@ class MetadataEnricher:
                     genres.append(g)
             if genres:
                 movie.genres = genres
-                if any(ag in [x.lower() for x in genres] for ag in ("erotico", "erotica", "erotismo", "pornografico", "porno", "softcore", "hardcore", "hentai", "xxx", "adulti", "adult")):
+                if any(
+                    ag in [x.lower() for x in genres]
+                    for ag in (
+                        "erotico",
+                        "erotica",
+                        "erotismo",
+                        "pornografico",
+                        "porno",
+                        "softcore",
+                        "hardcore",
+                        "hentai",
+                        "xxx",
+                        "adulti",
+                        "adult",
+                    )
+                ):
                     movie.is_adult = True
 
         if meta.get("credits"):
@@ -373,7 +399,9 @@ class MetadataEnricher:
                 series.tmdb_id = int(meta["id"])
         if meta.get("imdb_id"):
             series.imdb_id = str(meta["imdb_id"])
-        elif meta.get("external_ids") and isinstance(meta["external_ids"], dict) and meta["external_ids"].get("imdb_id"):
+        elif (
+            meta.get("external_ids") and isinstance(meta["external_ids"], dict) and meta["external_ids"].get("imdb_id")
+        ):
             series.imdb_id = str(meta["external_ids"]["imdb_id"])
 
         if meta.get("overview"):
@@ -411,7 +439,15 @@ class MetadataEnricher:
         if not series.certification and meta.get("certification"):
             series.certification = str(meta["certification"])
 
-        if meta.get("adult") or meta.get("is_adult") or (series.certification and series.certification.upper().strip() in ("VM18", "VM 18", "18+", "+18", "TV-MA", "NC-17", "PEGI 18", "XXX")):
+        if (
+            meta.get("adult")
+            or meta.get("is_adult")
+            or (
+                series.certification
+                and series.certification.upper().strip()
+                in ("VM18", "VM 18", "18+", "+18", "TV-MA", "NC-17", "PEGI 18", "XXX")
+            )
+        ):
             series.is_adult = True
 
         # Extract watch providers if returned by TMDb
@@ -428,7 +464,22 @@ class MetadataEnricher:
                     genres.append(g)
             if genres:
                 series.genres = genres
-                if any(ag in [x.lower() for x in genres] for ag in ("erotico", "erotica", "erotismo", "pornografico", "porno", "softcore", "hardcore", "hentai", "xxx", "adulti", "adult")):
+                if any(
+                    ag in [x.lower() for x in genres]
+                    for ag in (
+                        "erotico",
+                        "erotica",
+                        "erotismo",
+                        "pornografico",
+                        "porno",
+                        "softcore",
+                        "hardcore",
+                        "hentai",
+                        "xxx",
+                        "adulti",
+                        "adult",
+                    )
+                ):
                     series.is_adult = True
 
     async def enrich_tv_season(self, series_tmdb_id: int | None, season: Any) -> Any:

@@ -90,5 +90,3 @@ class TestSkipSegments:
         res = asyncio.run(self.manager.get_skip_segments("tt0903747", 1, 1))
         assert res["has_segments"]
         assert res["intro"]["start"] == 50.0
-
-

@@ -107,8 +107,14 @@ class TestProxyStreamRegression:
         assert "/ingress/stream/test_token_abc?url=https%3A%2F%2Fstream.server.org%2Fhls%2F1080p.m3u8" in lines
 
         # Check audio and subtitle media tags are also rewritten to stream endpoints
-        assert any('URI="/ingress/stream/test_token_abc?url=https%3A%2F%2Fstream.server.org%2Fhls%2Faudio_ita.m3u8"' in line for line in lines)
-        assert any('URI="/ingress/stream/test_token_abc?url=https%3A%2F%2Fstream.server.org%2Fhls%2Fsub_ita.m3u8"' in line for line in lines)
+        assert any(
+            'URI="/ingress/stream/test_token_abc?url=https%3A%2F%2Fstream.server.org%2Fhls%2Faudio_ita.m3u8"' in line
+            for line in lines
+        )
+        assert any(
+            'URI="/ingress/stream/test_token_abc?url=https%3A%2F%2Fstream.server.org%2Fhls%2Fsub_ita.m3u8"' in line
+            for line in lines
+        )
 
     def test_rewrite_m3u8_media_playlist_segments(self) -> None:
         """Test media playlist segments rewriting to proxy segment endpoints."""
@@ -128,5 +134,3 @@ seg-002.ts
         lines = rewritten.splitlines()
         assert "/segment/test_token_xyz?url=https%3A%2F%2Fstream.server.org%2Fhls%2F1080p%2Fseg-001.ts" in lines
         assert "/segment/test_token_xyz?url=https%3A%2F%2Fstream.server.org%2Fhls%2F1080p%2Fseg-002.ts" in lines
-
-

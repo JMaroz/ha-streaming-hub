@@ -75,5 +75,3 @@ Seconda linea di sottotitoli.
         # Non-mocked aiohttp in sandbox will fail connection or return empty gracefully
         tracks = asyncio.run(manager.search_subtitles(imdb_id="tt1375666", query="Inception"))
         assert isinstance(tracks, list)
-
-
