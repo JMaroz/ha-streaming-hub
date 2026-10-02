@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.5.0](https://github.com/JMaroz/streaming-hub-ha/compare/v2.4.0...v2.5.0) (2026-10-02)
+
+
+### Features
+
+* **catalog:** add dynamic metadata refresh, TTL invalidation, and 12h background sync ([8b0d385](https://github.com/JMaroz/streaming-hub-ha/commit/8b0d38530efb131317f985ef7657478a945d9ea9))
+
+
+### Bug Fixes
+
+* **cast:** prioritize genuine Cast devices and eliminate invalid url mime fallback ([4fc3ddc](https://github.com/JMaroz/streaming-hub-ha/commit/4fc3ddcb1aecf228e56097fb92ebb0dc325b3637))
+
 ## [2.4.0](https://github.com/JMaroz/streaming-hub-ha/compare/v2.3.0...v2.4.0) (2026-10-02)
 
 
