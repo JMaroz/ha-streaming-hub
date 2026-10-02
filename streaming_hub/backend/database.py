@@ -183,6 +183,7 @@ class MediaDatabase:
                 CREATE INDEX IF NOT EXISTS idx_titles_updated ON titles(updated_at);
 
                 CREATE INDEX IF NOT EXISTS idx_seasons_series ON seasons(series_id, season_number);
+                CREATE INDEX IF NOT EXISTS idx_seasons_updated ON seasons(updated_at);
 
                 CREATE INDEX IF NOT EXISTS idx_history_updated ON watch_history(profile_id, updated_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_history_profile_media ON watch_history(profile_id, media_id);
@@ -270,22 +271,45 @@ class MediaDatabase:
                 ),
             )
 
-    async def get_title(self, title_id: str) -> dict[str, Any] | None:
-        """Retrieve cached title dictionary from SQLite."""
+    async def get_title_record(self, title_id: str) -> dict[str, Any] | None:
+        """Retrieve cached title record with cache age metadata from SQLite."""
         async with self._lock:
-            return await asyncio.to_thread(self._get_title_sync, title_id)
+            return await asyncio.to_thread(self._get_title_record_sync, title_id)
 
-    def _get_title_sync(self, title_id: str) -> dict[str, Any] | None:
-        """Synchronously get title by id."""
+    def _get_title_record_sync(self, title_id: str) -> dict[str, Any] | None:
+        """Synchronously get title record with age by id."""
         with self._get_connection() as conn:
-            cursor = conn.execute("SELECT raw_json FROM titles WHERE id = ?", (title_id,))
+            cursor = conn.execute(
+                """
+                SELECT raw_json, updated_at,
+                       (strftime('%s', 'now') - strftime('%s', updated_at)) AS age_seconds
+                FROM titles WHERE id = ?
+                """,
+                (title_id,),
+            )
             row = cursor.fetchone()
             if row and row["raw_json"]:
                 try:
-                    return json.loads(row["raw_json"])
+                    data = json.loads(row["raw_json"])
+                    age = int(row["age_seconds"]) if row["age_seconds"] is not None else 0
+                    return {
+                        "data": data,
+                        "age_seconds": max(0, age),
+                        "updated_at": str(row["updated_at"] or ""),
+                    }
                 except Exception as err:
                     _LOGGER.warning("Corrupted raw_json for title %s: %s", title_id, err)
         return None
+
+    async def get_title(self, title_id: str) -> dict[str, Any] | None:
+        """Retrieve cached title dictionary from SQLite."""
+        rec = await self.get_title_record(title_id)
+        return rec["data"] if rec else None
+
+    def _get_title_sync(self, title_id: str) -> dict[str, Any] | None:
+        """Synchronously get title by id."""
+        rec = self._get_title_record_sync(title_id)
+        return rec["data"] if rec else None
 
     async def enrich_items_with_cached_metadata(self, items: list[Any]) -> None:
         """Enrich a batch of items in-place with SQLite-cached metadata."""
@@ -469,16 +493,23 @@ class MediaDatabase:
                 (season_id, series_id, season.number, episodes_json),
             )
 
-    async def get_season(self, series_id: str, season_number: int) -> TvSeason | None:
-        """Retrieve a cached season with its episodes from SQLite."""
+    async def get_season_record(self, series_id: str, season_number: int) -> dict[str, Any] | None:
+        """Retrieve a cached season with age metadata from SQLite."""
         async with self._lock:
-            return await asyncio.to_thread(self._get_season_sync, series_id, season_number)
+            return await asyncio.to_thread(self._get_season_record_sync, series_id, season_number)
 
-    def _get_season_sync(self, series_id: str, season_number: int) -> TvSeason | None:
-        """Synchronously get season by series_id and season_number."""
+    def _get_season_record_sync(self, series_id: str, season_number: int) -> dict[str, Any] | None:
+        """Synchronously get season record with age by series_id and season_number."""
         season_id = f"{series_id}_s{season_number}"
         with self._get_connection() as conn:
-            cursor = conn.execute("SELECT episodes_json FROM seasons WHERE id = ?", (season_id,))
+            cursor = conn.execute(
+                """
+                SELECT episodes_json, updated_at,
+                       (strftime('%s', 'now') - strftime('%s', updated_at)) AS age_seconds
+                FROM seasons WHERE id = ?
+                """,
+                (season_id,),
+            )
             row = cursor.fetchone()
             if not row or not row["episodes_json"]:
                 return None
@@ -512,10 +543,26 @@ class MediaDatabase:
                             sources=sources,
                         )
                     )
-                return TvSeason(number=season_number, episodes=episodes)
+                season = TvSeason(number=season_number, episodes=episodes)
+                age = int(row["age_seconds"]) if row["age_seconds"] is not None else 0
+                return {
+                    "season": season,
+                    "age_seconds": max(0, age),
+                    "updated_at": str(row["updated_at"] or ""),
+                }
             except Exception as err:
                 _LOGGER.warning("Error parsing cached season %s: %s", season_id, err)
                 return None
+
+    async def get_season(self, series_id: str, season_number: int) -> TvSeason | None:
+        """Retrieve a cached season with its episodes from SQLite."""
+        rec = await self.get_season_record(series_id, season_number)
+        return rec["season"] if rec else None
+
+    def _get_season_sync(self, series_id: str, season_number: int) -> TvSeason | None:
+        """Synchronously get season by series_id and season_number."""
+        rec = self._get_season_record_sync(series_id, season_number)
+        return rec["season"] if rec else None
 
     async def get_next_episode(
         self,
@@ -1023,3 +1070,88 @@ class MediaDatabase:
                 "SELECT 1 FROM favorites WHERE profile_id = ? AND title_id = ? LIMIT 1", (profile_id, title_id)
             )
             return cursor.fetchone() is not None
+
+    async def get_candidates_for_background_sync(self, limit: int = 15) -> list[dict[str, Any]]:
+        """Retrieve active series and movies eligible for periodic background revalidation."""
+        async with self._lock:
+            return await asyncio.to_thread(self._get_candidates_for_background_sync_sync, limit)
+
+    def _get_candidates_for_background_sync_sync(self, limit: int = 15) -> list[dict[str, Any]]:
+        """Synchronously retrieve active series and movies eligible for background refresh."""
+        with self._get_connection() as conn:
+            # 1. TV Series candidates from watch history (last 14 days) and favorites:
+            query_tv = """
+                WITH active_series AS (
+                    SELECT media_id, MAX(season_number) as max_s, MAX(updated_at) as last_act
+                    FROM watch_history
+                    WHERE media_type = 'tv' AND updated_at >= datetime('now', '-14 days')
+                    GROUP BY media_id
+                    UNION
+                    SELECT title_id as media_id, 1 as max_s, added_at as last_act
+                    FROM favorites
+                    WHERE media_type = 'tv'
+                ),
+                consolidated_series AS (
+                    SELECT media_id, MAX(COALESCE(max_s, 1)) as target_season, MAX(last_act) as latest_activity
+                    FROM active_series
+                    GROUP BY media_id
+                )
+                SELECT c.media_id, 'tv' as media_type, c.target_season,
+                       (strftime('%s', 'now') - strftime('%s', s.updated_at)) as age_seconds
+                FROM consolidated_series c
+                LEFT JOIN seasons s ON s.series_id = c.media_id AND s.season_number = c.target_season
+                WHERE s.updated_at IS NULL OR (strftime('%s', 'now') - strftime('%s', s.updated_at)) > 43200
+                ORDER BY c.latest_activity DESC
+                LIMIT ?;
+            """
+            cursor_tv = conn.execute(query_tv, (limit,))
+            tv_candidates = [
+                {
+                    "media_id": row["media_id"],
+                    "media_type": "tv",
+                    "season_number": int(row["target_season"] or 1),
+                    "age_seconds": int(row["age_seconds"]) if row["age_seconds"] is not None else None,
+                }
+                for row in cursor_tv.fetchall()
+            ]
+
+            # 2. Movie candidates from active watch history (last 14 days) and favorites:
+            remaining_limit = max(0, limit - len(tv_candidates))
+            movie_candidates: list[dict[str, Any]] = []
+            if remaining_limit > 0:
+                query_movie = """
+                    WITH active_movies AS (
+                        SELECT media_id, MAX(updated_at) as last_act
+                        FROM watch_history
+                        WHERE media_type = 'movie' AND updated_at >= datetime('now', '-14 days')
+                        GROUP BY media_id
+                        UNION
+                        SELECT title_id as media_id, added_at as last_act
+                        FROM favorites
+                        WHERE media_type = 'movie'
+                    ),
+                    consolidated_movies AS (
+                        SELECT media_id, MAX(last_act) as latest_activity
+                        FROM active_movies
+                        GROUP BY media_id
+                    )
+                    SELECT m.media_id, 'movie' as media_type,
+                           (strftime('%s', 'now') - strftime('%s', t.updated_at)) as age_seconds
+                    FROM consolidated_movies m
+                    LEFT JOIN titles t ON t.id = m.media_id
+                    WHERE t.updated_at IS NULL OR (strftime('%s', 'now') - strftime('%s', t.updated_at)) > 43200
+                    ORDER BY m.latest_activity DESC
+                    LIMIT ?;
+                """
+                cursor_movie = conn.execute(query_movie, (remaining_limit,))
+                movie_candidates = [
+                    {
+                        "media_id": row["media_id"],
+                        "media_type": "movie",
+                        "season_number": None,
+                        "age_seconds": int(row["age_seconds"]) if row["age_seconds"] is not None else None,
+                    }
+                    for row in cursor_movie.fetchall()
+                ]
+
+            return tv_candidates + movie_candidates

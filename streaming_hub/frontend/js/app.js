@@ -114,6 +114,8 @@
     modalRating: document.getElementById("modal-rating"),
     modalCert: document.getElementById("modal-cert"),
     modalTypeBadge: document.getElementById("modal-type-badge"),
+    modalUpdateChip: document.getElementById("modal-update-chip"),
+    modalUpdateChipText: document.getElementById("modal-update-chip-text"),
     modalGenres: document.getElementById("modal-genres"),
     modalPlot: document.getElementById("modal-plot"),
     modalCastSection: document.getElementById("modal-cast-section"),
@@ -398,6 +400,11 @@
           toggleFavoriteItem(state.selectedItem);
         }
       });
+    }
+
+    // Modal Update Chip Trigger (Refresh Title / Season Metadata)
+    if (elements.modalUpdateChip) {
+      elements.modalUpdateChip.addEventListener("click", handleRefreshDetailsAction);
     }
 
     // Hero Favorite Button
@@ -1386,6 +1393,28 @@
     }
   }
 
+  // Helper: Format last updated relative time
+  function formatLastUpdated(ageSeconds, updatedAtIso = null) {
+    let sec = ageSeconds;
+    if ((sec === undefined || sec === null) && updatedAtIso) {
+      const parsed = new Date(updatedAtIso).getTime();
+      if (!isNaN(parsed)) {
+        sec = Math.max(0, Math.floor((Date.now() - parsed) / 1000));
+      }
+    }
+    if (sec === undefined || sec === null || sec < 86400) {
+      return null;
+    }
+    const days = Math.floor(sec / 86400);
+    if (days === 1) {
+      return "Aggiornato ieri • Clicca per aggiornare";
+    }
+    if (days < 7) {
+      return `Aggiornato ${days} giorni fa • Clicca per aggiornare`;
+    }
+    return "Aggiornato > 7 giorni fa • Clicca per aggiornare";
+  }
+
   // All Shelves Refresh
   function refreshAllShelves() {
     loadContinueWatching();
@@ -1805,7 +1834,66 @@
       renderSources(item.sources || []);
     }
 
+    // Freshness Update Chip (> 24 hours check)
+    if (elements.modalUpdateChip && elements.modalUpdateChipText) {
+      const chipLabel = formatLastUpdated(item.age_seconds, item.updated_at);
+      if (chipLabel) {
+        elements.modalUpdateChipText.textContent = chipLabel;
+        elements.modalUpdateChip.classList.remove("hidden");
+      } else {
+        elements.modalUpdateChip.classList.add("hidden");
+      }
+    }
+
     updatePlayButtonText();
+  }
+
+  // Handle manual refresh triggered by update chip
+  async function handleRefreshDetailsAction() {
+    const item = state.selectedItem;
+    if (!item || !elements.modalUpdateChip) return;
+
+    if (elements.modalUpdateChip.classList.contains("updating")) return;
+    elements.modalUpdateChip.classList.add("updating");
+    if (elements.modalUpdateChipText) {
+      elements.modalUpdateChipText.textContent = "Aggiornamento in corso...";
+    }
+
+    try {
+      const isTv = item.type === "tv" || (item.seasons && item.seasons.length > 0);
+      const mediaType = isTv ? "tv" : "movie";
+      const targetSeason = state.selectedSeason || 1;
+      const targetEp = state.selectedEpisode ? state.selectedEpisode.episode_number : null;
+
+      const refreshUrl = `api/catalog/title/${mediaType}/${item.id}?profile_id=${encodeURIComponent(state.activeProfileId)}&refresh=true`;
+      const resp = await fetch(apiUrl(refreshUrl));
+
+      if (resp.ok) {
+        const fresh = await resp.json();
+        state.selectedItem = fresh;
+
+        if (isTv) {
+          // Force refresh active season episodes
+          const activeSeasonObj =
+            (fresh.seasons || []).find((s) => s.number === targetSeason) ||
+            (fresh.seasons && fresh.seasons[0]);
+          if (activeSeasonObj) {
+            await activateSeason(activeSeasonObj, targetEp, true);
+          }
+        }
+
+        updateModalWithDetails(fresh, targetEp);
+        showToast("Dati e puntate aggiornati con successo! ✓", "success");
+      } else {
+        showToast("Impossibile aggiornare i dati in questo momento.", "warning");
+      }
+    } catch (err) {
+      console.warn("Error refreshing details:", err);
+      showToast("Errore durante l'aggiornamento.", "error");
+    } finally {
+      elements.modalUpdateChip.classList.remove("updating");
+      elements.modalUpdateChip.classList.add("hidden");
+    }
   }
 
   // Render Watch Providers (Streaming Platforms)
@@ -1895,8 +1983,8 @@
     activateSeason(activeSeasonObj, targetEpisode);
   }
 
-  async function activateSeason(season, targetEpisode = null) {
-    if (season.episodes && season.episodes.length > 0) {
+  async function activateSeason(season, targetEpisode = null, forceRefresh = false) {
+    if (!forceRefresh && season.episodes && season.episodes.length > 0) {
       renderEpisodes(season.episodes, targetEpisode);
       return;
     }
@@ -1910,7 +1998,10 @@
 
     try {
       const seriesId = state.selectedItem ? state.selectedItem.id : "";
-      const resp = await fetch(apiUrl(`api/catalog/seasons/${seriesId}/${season.number}`));
+      const seasonUrl = forceRefresh
+        ? `api/catalog/seasons/${seriesId}/${season.number}?refresh=true`
+        : `api/catalog/seasons/${seriesId}/${season.number}`;
+      const resp = await fetch(apiUrl(seasonUrl));
       if (resp.ok) {
         const data = await resp.json();
         season.episodes = data.episodes || [];

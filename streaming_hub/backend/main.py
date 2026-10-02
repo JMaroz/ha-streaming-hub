@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 import json
 import logging
 import os
@@ -198,6 +199,52 @@ async def init_sources(sources_list: list[dict[str, Any]], custom_dns: str) -> N
                 _LOGGER.warning("Source #%d (%s) could not be mapped to any known streaming engine.", idx + 1, url)
 
 
+CACHE_TTL_ON_DEMAND_SECONDS = 24 * 3600  # 24 hours
+BG_SYNC_INTERVAL_SECONDS = 12 * 3600  # 12 hours
+
+
+async def _background_sync_worker() -> None:
+    """Periodic background worker running every 12 hours to refresh active series and movies."""
+    _LOGGER.info("Starting background metadata sync worker (interval: 12h)...")
+    while True:
+        try:
+            await asyncio.sleep(BG_SYNC_INTERVAL_SECONDS)
+            candidates = await db.get_candidates_for_background_sync(limit=15)
+            if candidates:
+                _LOGGER.info("Background sync starting for %d active candidates", len(candidates))
+            for cand in candidates:
+                media_id = cand["media_id"]
+                media_type = cand["media_type"]
+                try:
+                    if media_type == "tv" and cand.get("season_number"):
+                        s_num = cand["season_number"]
+                        _LOGGER.debug("Background syncing TV series %s S%s", media_id, s_num)
+                        fresh_season = await source_manager.get_season(media_id, s_num)
+                        if fresh_season and fresh_season.episodes:
+                            title_data = await db.get_title(media_id)
+                            tmdb_id = title_data.get("tmdb_id") if title_data else None
+                            if tmdb_id:
+                                await metadata_enricher.enrich_tv_season(tmdb_id, fresh_season)
+                            await db.save_season(media_id, fresh_season)
+                    elif media_type == "movie":
+                        _LOGGER.debug("Background syncing movie %s", media_id)
+                        fresh_movie = await source_manager.get_details("movie", media_id)
+                        if fresh_movie:
+                            tmdb_key = CONFIG.get("tmdb_api_key") or metadata_enricher.tmdb_api_key
+                            await metadata_enricher.enrich_movie(fresh_movie, api_key=tmdb_key)
+                            await db.save_title(fresh_movie)
+                except Exception as err:
+                    _LOGGER.debug("Background sync skipped item %s: %s", media_id, err)
+                # Polite non-blocking pause between requests to prevent upstream rate limiting
+                await asyncio.sleep(2)
+        except asyncio.CancelledError:
+            _LOGGER.info("Background sync worker cancelled.")
+            break
+        except Exception as err:
+            _LOGGER.warning("Unexpected error in background sync worker: %s", err)
+            await asyncio.sleep(60)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application startup and shutdown lifecycle."""
@@ -217,11 +264,17 @@ async def lifespan(app: FastAPI):
         custom_dns,
         CONFIG.get("stream_port"),
     )
-    yield
-    _LOGGER.info("Shutting down Streaming Hub...")
-    await source_manager.close_all()
-    await metadata_enricher.close()
-    await stream_proxy.close()
+    sync_task = asyncio.create_task(_background_sync_worker())
+    try:
+        yield
+    finally:
+        _LOGGER.info("Shutting down Streaming Hub...")
+        sync_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await sync_task
+        await source_manager.close_all()
+        await metadata_enricher.close()
+        await stream_proxy.close()
 
 
 app = FastAPI(
@@ -722,16 +775,24 @@ async def get_by_genre(
 
 
 @app.get("/api/catalog/title/{media_type}/{title_id}")
-async def get_title_details(media_type: str, title_id: str, profile_id: str = Query("default")) -> dict[str, Any]:
-    """Fetch complete details, enriched metadata, and sources for a title with SQLite caching."""
+async def get_title_details(
+    media_type: str,
+    title_id: str,
+    profile_id: str = Query("default"),
+    refresh: bool = Query(False),
+) -> dict[str, Any]:
+    """Fetch complete details, enriched metadata, and sources for a title with SQLite caching and dynamic TTL."""
     profile = get_profile_by_id(profile_id)
     active_country = (getattr(profile, "country", None) or CONFIG.get("country", "IT")).upper()
     # Always use the primary global generic TMDb API key for all profiles
     tmdb_key = CONFIG.get("tmdb_api_key") or metadata_enricher.tmdb_api_key
 
-    # Check SQLite cache first for instant response
-    cached = await db.get_title(title_id)
-    if cached:
+    # Check SQLite cache record
+    cached_rec = await db.get_title_record(title_id)
+    cached = cached_rec["data"] if cached_rec else None
+
+    # Return cached data if fresh and refresh is not forced
+    if cached and not refresh and cached_rec["age_seconds"] <= CACHE_TTL_ON_DEMAND_SECONDS:
         if not is_title_allowed_for_profile(cached, profile):
             raise HTTPException(
                 status_code=403, detail="Contenuto non disponibile per il profilo selezionato (restrizione d'età)."
@@ -741,6 +802,8 @@ async def get_title_details(media_type: str, title_id: str, profile_id: str = Qu
         if not tmdb_key or has_wp:
             cached["is_favorite"] = await db.is_favorite(title_id, profile_id=profile.id)
             cached["streaming_availability"] = extract_streaming_availability(cached, active_country)
+            cached["age_seconds"] = cached_rec["age_seconds"]
+            cached["updated_at"] = cached_rec["updated_at"]
             return cached
 
     try:
@@ -750,6 +813,8 @@ async def get_title_details(media_type: str, title_id: str, profile_id: str = Qu
         if cached:
             cached["is_favorite"] = await db.is_favorite(title_id, profile_id=profile.id)
             cached["streaming_availability"] = extract_streaming_availability(cached, active_country)
+            cached["age_seconds"] = cached_rec["age_seconds"] if cached_rec else 0
+            cached["updated_at"] = cached_rec["updated_at"] if cached_rec else ""
             return cached
         raise HTTPException(status_code=404, detail=f"Titolo non trovato: {err}")
 
@@ -774,17 +839,27 @@ async def get_title_details(media_type: str, title_id: str, profile_id: str = Qu
     data = item.to_dict()
     data["is_favorite"] = await db.is_favorite(title_id, profile_id=profile.id)
     data["streaming_availability"] = extract_streaming_availability(data, active_country)
+    data["age_seconds"] = 0
+    data["updated_at"] = datetime.now(UTC).isoformat()
     return data
 
 
 @app.get("/api/catalog/seasons/{series_id}/{season_number}")
-async def get_season_episodes(series_id: str, season_number: int, profile_id: str = Query("default")) -> dict[str, Any]:
-    """Retrieve episodes for a specific TV series season with SQLite caching."""
+async def get_season_episodes(
+    series_id: str,
+    season_number: int,
+    profile_id: str = Query("default"),
+    refresh: bool = Query(False),
+) -> dict[str, Any]:
+    """Retrieve episodes for a specific TV series season with SQLite caching and dynamic TTL."""
     _ = get_profile_by_id(profile_id)
-    # Check SQLite cache first
-    cached_season = await db.get_season(series_id, season_number)
-    if cached_season and cached_season.episodes:
-        return cached_season.to_dict()
+    cached_rec = await db.get_season_record(series_id, season_number)
+
+    if cached_rec and not refresh and cached_rec["age_seconds"] <= CACHE_TTL_ON_DEMAND_SECONDS:
+        res = cached_rec["season"].to_dict()
+        res["age_seconds"] = cached_rec["age_seconds"]
+        res["updated_at"] = cached_rec["updated_at"]
+        return res
 
     try:
         season = await source_manager.get_season(series_id, season_number)
@@ -795,9 +870,18 @@ async def get_season_episodes(series_id: str, season_number: int, profile_id: st
             if tmdb_id:
                 await metadata_enricher.enrich_tv_season(tmdb_id, season)
             await db.save_season(series_id, season)
-        return season.to_dict()
+        res = season.to_dict()
+        res["age_seconds"] = 0
+        res["updated_at"] = datetime.now(UTC).isoformat()
+        return res
     except Exception as err:
         _LOGGER.error("Error fetching season %s for %s: %s", season_number, series_id, err)
+        if cached_rec:
+            _LOGGER.warning("Falling back to cached season %s for %s", season_number, series_id)
+            res = cached_rec["season"].to_dict()
+            res["age_seconds"] = cached_rec["age_seconds"]
+            res["updated_at"] = cached_rec["updated_at"]
+            return res
         raise HTTPException(status_code=404, detail=f"Stagione non trovata: {err}")
 
 
