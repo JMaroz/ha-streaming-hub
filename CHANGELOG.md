@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.4.0](https://github.com/JMaroz/streaming-hub-ha/compare/v2.3.0...v2.4.0) (2026-10-02)
+
+
+### Features
+
+* **player:** add smart credits detection, skip intro, and isolate watch progress ([1e4e613](https://github.com/JMaroz/streaming-hub-ha/commit/1e4e61338ec74e962e503f727e42e220afb7f702))
+
 ## [2.3.0](https://github.com/JMaroz/streaming-hub-ha/compare/v2.2.1...v2.3.0) (2026-10-01)
 
 
