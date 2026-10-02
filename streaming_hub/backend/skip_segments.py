@@ -74,15 +74,14 @@ class SkipSegmentManager:
                         self._cache[cache_key] = result
                         return result
             else:
-                async with aiohttp.ClientSession(timeout=timeout) as session:
-                    async with session.get(
-                        SKIPDB_BASE_URL, params=params, headers=headers
-                    ) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            result = self._parse_skipdb_response(data)
-                            self._cache[cache_key] = result
-                            return result
+                async with aiohttp.ClientSession(timeout=timeout) as session, session.get(
+                    SKIPDB_BASE_URL, params=params, headers=headers
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        result = self._parse_skipdb_response(data)
+                        self._cache[cache_key] = result
+                        return result
         except Exception as err:
             _LOGGER.debug(
                 "SkipDB lookup failed for %s S%sE%s: %s",

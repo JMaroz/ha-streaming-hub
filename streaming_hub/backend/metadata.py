@@ -139,10 +139,9 @@ class MetadataEnricher:
                         return True, "Chiave API TMDb valida e funzionante."
                     msg = data.get("status_message") if data else "Risposta non valida da TMDb."
                     return False, f"Errore TMDb: {msg}"
-                elif resp.status == 401:
+                if resp.status == 401:
                     return False, "Chiave API TMDb non valida o non autorizzata (401 Unauthorized)."
-                else:
-                    return False, f"TMDb ha risposto con codice di errore HTTP {resp.status}."
+                return False, f"TMDb ha risposto con codice di errore HTTP {resp.status}."
         except Exception as err:
             _LOGGER.warning("TMDb validation request failed: %s", err)
             return False, f"Impossibile contattare i server TMDb: {err}"
@@ -336,9 +335,7 @@ class MetadataEnricher:
             movie.certification = str(meta["certification"])
 
         # Check adult flag and certification
-        if meta.get("adult") or meta.get("is_adult"):
-            movie.is_adult = True
-        elif movie.certification and movie.certification.upper().strip() in ("VM18", "VM 18", "18+", "+18", "NC-17", "PEGI 18", "XXX"):
+        if meta.get("adult") or meta.get("is_adult") or (movie.certification and movie.certification.upper().strip() in ("VM18", "VM 18", "18+", "+18", "NC-17", "PEGI 18", "XXX")):
             movie.is_adult = True
 
         if meta.get("genres"):
@@ -414,9 +411,7 @@ class MetadataEnricher:
         if not series.certification and meta.get("certification"):
             series.certification = str(meta["certification"])
 
-        if meta.get("adult") or meta.get("is_adult"):
-            series.is_adult = True
-        elif series.certification and series.certification.upper().strip() in ("VM18", "VM 18", "18+", "+18", "TV-MA", "NC-17", "PEGI 18", "XXX"):
+        if meta.get("adult") or meta.get("is_adult") or (series.certification and series.certification.upper().strip() in ("VM18", "VM 18", "18+", "+18", "TV-MA", "NC-17", "PEGI 18", "XXX")):
             series.is_adult = True
 
         # Extract watch providers if returned by TMDb

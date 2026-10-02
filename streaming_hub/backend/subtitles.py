@@ -6,7 +6,6 @@ import logging
 import re
 import secrets
 from typing import Any
-import urllib.parse
 
 import aiohttp
 

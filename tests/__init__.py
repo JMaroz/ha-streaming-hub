@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 if "aiohttp" not in sys.modules:
     try:
-        import aiohttp
+        import aiohttp  # noqa: F401
     except ImportError:
         import types
 

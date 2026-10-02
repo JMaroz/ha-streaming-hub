@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from typing import Any
-import unittest
+from typing import Any, Self
 from unittest.mock import AsyncMock, MagicMock, patch
 
 if "aiohttp" not in sys.modules:
     try:
-        import aiohttp
+        import aiohttp  # noqa: F401
     except ImportError:
         import types
 
@@ -31,22 +30,22 @@ from streaming_hub.backend.ha_client import HACoreClient
 from streaming_hub.backend.models import CastDeviceInfo
 
 
-class TestCastPlaybackRegression(unittest.TestCase):
+class TestCastPlaybackRegression:
     """Test suite ensuring 100% zero-regression reliability for Cast and media_player commands."""
 
-    def setUp(self) -> None:
+    def setup_method(self, method=None) -> None:
         """Initialize HACoreClient with a test token."""
         self.client = HACoreClient(token="mock_supervisor_token", base_url="http://mock-supervisor/core/api")
 
     def test_availability_and_headers(self) -> None:
         """Test token presence and authentication headers."""
-        self.assertTrue(self.client.is_available)
+        assert self.client.is_available
         headers = self.client._get_headers()
-        self.assertEqual(headers["Authorization"], "Bearer mock_supervisor_token")
-        self.assertEqual(headers["Content-Type"], "application/json")
+        assert headers["Authorization"] == "Bearer mock_supervisor_token"
+        assert headers["Content-Type"] == "application/json"
 
         unauthed = HACoreClient(token="")
-        self.assertFalse(unauthed.is_available)
+        assert not unauthed.is_available
 
     def test_media_player_discovery_and_filtering(self) -> None:
         """Test that media players are discovered and non-streamable devices are discarded."""
@@ -100,10 +99,10 @@ class TestCastPlaybackRegression(unittest.TestCase):
             async def json(self) -> Any:
                 return self._json
 
-            async def __aenter__(self) -> MockResponse:
+            async def __aenter__(self) -> Self:
                 return self
 
-            async def __aexit__(self, *args: Any) -> None:
+            async def __aexit__(self, *args: object) -> None:
                 pass
 
         class MockClientSession:
@@ -113,10 +112,10 @@ class TestCastPlaybackRegression(unittest.TestCase):
             def get(self, url: str, **kwargs: Any) -> MockResponse:
                 return MockResponse(mock_states)
 
-            async def __aenter__(self) -> MockClientSession:
+            async def __aenter__(self) -> Self:
                 return self
 
-            async def __aexit__(self, *args: Any) -> None:
+            async def __aexit__(self, *args: object) -> None:
                 pass
 
         with patch("aiohttp.ClientSession", MockClientSession):
@@ -124,13 +123,13 @@ class TestCastPlaybackRegression(unittest.TestCase):
             entity_ids = [p.entity_id for p in players]
 
             # Allowed stream targets
-            self.assertIn("media_player.living_room_tv", entity_ids)
-            self.assertIn("media_player.tpm191e_chassis", entity_ids)
+            assert "media_player.living_room_tv" in entity_ids
+            assert "media_player.tpm191e_chassis" in entity_ids
 
             # Blocked / Filtered out
-            self.assertNotIn("media_player.kitchen_nest_mini", entity_ids)  # Nest speaker
-            self.assertNotIn("media_player.browser", entity_ids)  # Browser target
-            self.assertNotIn("media_player.bedroom_tv_remote", entity_ids)  # No play_media feature
+            assert "media_player.kitchen_nest_mini" not in entity_ids  # Nest speaker
+            assert "media_player.browser" not in entity_ids  # Browser target
+            assert "media_player.bedroom_tv_remote" not in entity_ids  # No play_media feature
 
     def test_play_on_device_tier1_success(self) -> None:
         """Test play_on_device succeeds on Tier 1 (with extra metadata)."""
@@ -142,10 +141,10 @@ class TestCastPlaybackRegression(unittest.TestCase):
             async def text(self) -> str:
                 return "OK"
 
-            async def __aenter__(self) -> MockResponse:
+            async def __aenter__(self) -> Self:
                 return self
 
-            async def __aexit__(self, *args: Any) -> None:
+            async def __aexit__(self, *args: object) -> None:
                 pass
 
         class MockSession:
@@ -156,10 +155,10 @@ class TestCastPlaybackRegression(unittest.TestCase):
                 captured_payloads.append(json)
                 return MockResponse()
 
-            async def __aenter__(self) -> MockSession:
+            async def __aenter__(self) -> Self:
                 return self
 
-            async def __aexit__(self, *args: Any) -> None:
+            async def __aexit__(self, *args: object) -> None:
                 pass
 
         with patch("aiohttp.ClientSession", MockSession):
@@ -172,13 +171,13 @@ class TestCastPlaybackRegression(unittest.TestCase):
                 )
             )
 
-            self.assertTrue(success)
-            self.assertEqual(entity, "media_player.living_room_tv")
-            self.assertEqual(len(captured_payloads), 1)
+            assert success
+            assert entity == "media_player.living_room_tv"
+            assert len(captured_payloads) == 1
             payload = captured_payloads[0]
-            self.assertEqual(payload["entity_id"], "media_player.living_room_tv")
-            self.assertEqual(payload["media_content_id"], "http://192.168.1.10:8099/stream/tok123")
-            self.assertEqual(payload["extra"]["title"], "Inception")
+            assert payload["entity_id"] == "media_player.living_room_tv"
+            assert payload["media_content_id"] == "http://192.168.1.10:8099/stream/tok123"
+            assert payload["extra"]["title"] == "Inception"
 
     def test_play_on_device_fallback_tier2_when_extra_crashes(self) -> None:
         """Test fallback to Tier 2 (without extra dict) when target device returns HTTP 400/500."""
@@ -203,10 +202,10 @@ class TestCastPlaybackRegression(unittest.TestCase):
                 mock_resp.__aexit__ = AsyncMock(return_value=None)
                 return mock_resp
 
-            async def __aenter__(self) -> MockSession:
+            async def __aenter__(self) -> Self:
                 return self
 
-            async def __aexit__(self, *args: Any) -> None:
+            async def __aexit__(self, *args: object) -> None:
                 pass
 
         with patch("aiohttp.ClientSession", MockSession):
@@ -218,11 +217,11 @@ class TestCastPlaybackRegression(unittest.TestCase):
                 )
             )
 
-            self.assertTrue(success)
-            self.assertEqual(entity, "media_player.strict_tv")
-            self.assertEqual(len(calls), 2)
+            assert success
+            assert entity == "media_player.strict_tv"
+            assert len(calls) == 2
             # Second call must not contain "extra"
-            self.assertNotIn("extra", calls[1])
+            assert "extra" not in calls[1]
 
     def test_play_on_device_fallback_tier3_companion_device(self) -> None:
         """Test fallback to companion cast device when main TV chassis fails."""
@@ -255,10 +254,10 @@ class TestCastPlaybackRegression(unittest.TestCase):
                     mock_resp.__aexit__ = AsyncMock(return_value=None)
                     return mock_resp
 
-                async def __aenter__(self) -> MockSession:
+                async def __aenter__(self) -> Self:
                     return self
 
-                async def __aexit__(self, *args: Any) -> None:
+                async def __aexit__(self, *args: object) -> None:
                     pass
 
             with patch("aiohttp.ClientSession", MockSession):
@@ -270,9 +269,9 @@ class TestCastPlaybackRegression(unittest.TestCase):
                     )
                 )
 
-                self.assertTrue(success)
-                self.assertEqual(entity, "media_player.philips_cast")
-                self.assertIn("media_player.philips_cast", calls)
+                assert success
+                assert entity == "media_player.philips_cast"
+                assert "media_player.philips_cast" in calls
 
     def test_remote_control_commands(self) -> None:
         """Test seek, play, pause, volume, and mute service routing."""
@@ -284,17 +283,15 @@ class TestCastPlaybackRegression(unittest.TestCase):
 
         with patch.object(self.client, "call_media_player_service", side_effect=mock_call):
             res_seek = asyncio.run(self.client.seek_media("media_player.tv", 120.0))
-            self.assertTrue(res_seek)
-            self.assertEqual(executed_services[-1], ("media_seek", {"seek_position": 120.0}))
+            assert res_seek
+            assert executed_services[-1] == ("media_seek", {"seek_position": 120.0})
 
             res_ctrl = asyncio.run(self.client.control_cast("media_player.tv", "pause"))
-            self.assertTrue(res_ctrl)
-            self.assertEqual(executed_services[-1][0], "media_pause")
+            assert res_ctrl
+            assert executed_services[-1][0] == "media_pause"
 
             res_vol = asyncio.run(self.client.control_cast("media_player.tv", "volume", 0.75))
-            self.assertTrue(res_vol)
-            self.assertEqual(executed_services[-1], ("volume_set", {"volume_level": 0.75}))
+            assert res_vol
+            assert executed_services[-1] == ("volume_set", {"volume_level": 0.75})
 
 
-if __name__ == "__main__":
-    unittest.main()

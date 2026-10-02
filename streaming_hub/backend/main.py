@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from contextlib import asynccontextmanager
 import json
 import logging
@@ -29,11 +30,11 @@ from .rating_filter import (
     get_profile_max_rating,
     is_title_allowed_for_profile,
 )
+from .skip_segments import SkipSegmentManager
 from .sources.crawler_source import CrawlerSource
 from .sources.detector import SourceDetector
 from .sources.manager import SourceManager
 from .sources.reactive_source import ReactiveSource
-from .skip_segments import SkipSegmentManager
 from .subtitles import SubtitleManager
 from .trakt_client import TraktClient
 from .utils import CatalogMerger
@@ -943,9 +944,11 @@ async def resolve_media_source(req: ResolveRequest, request: Request) -> dict[st
         try:
             cached_title = await db.get_title(req.media_id)
             if cached_title and cached_title.get("sources"):
-                for s in cached_title["sources"]:
-                    if s.get("page_url") != req.page_url and s.get("available", True):
-                        alternate_sources.append(ProviderSource.from_dict(s))
+                alternate_sources.extend(
+                    ProviderSource.from_dict(s)
+                    for s in cached_title["sources"]
+                    if s.get("page_url") != req.page_url and s.get("available", True)
+                )
         except Exception:
             pass
 
@@ -998,9 +1001,11 @@ async def cast_to_device(req: CastRequest) -> dict[str, Any]:
         try:
             cached_title = await db.get_title(req.media_id)
             if cached_title and cached_title.get("sources"):
-                for s in cached_title["sources"]:
-                    if s.get("page_url") != req.page_url and s.get("available", True):
-                        alternate_sources.append(ProviderSource.from_dict(s))
+                alternate_sources.extend(
+                    ProviderSource.from_dict(s)
+                    for s in cached_title["sources"]
+                    if s.get("page_url") != req.page_url and s.get("available", True)
+                )
         except Exception:
             pass
 

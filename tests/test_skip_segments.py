@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from unittest.mock import AsyncMock, MagicMock, patch
-import unittest
+from unittest.mock import MagicMock
 
 if "aiohttp" not in sys.modules:
     try:
-        import aiohttp
+        import aiohttp  # noqa: F401
     except ImportError:
         import types
 
@@ -29,18 +28,18 @@ if "aiohttp" not in sys.modules:
 from streaming_hub.backend.skip_segments import SkipSegmentManager
 
 
-class TestSkipSegments(unittest.TestCase):
+class TestSkipSegments:
     """Test suite ensuring SkipDB intro and outro parsing, caching and failover."""
 
-    def setUp(self) -> None:
+    def setup_method(self, method=None) -> None:
         self.manager = SkipSegmentManager()
 
     def test_empty_imdb_returns_no_segments(self) -> None:
         """Test that missing or invalid IMDb returns empty segments immediately."""
         res = asyncio.run(self.manager.get_skip_segments(None, 1, 1))
-        self.assertFalse(res["has_segments"])
-        self.assertIsNone(res["intro"])
-        self.assertIsNone(res["outro"])
+        assert not res["has_segments"]
+        assert res["intro"] is None
+        assert res["outro"] is None
 
     def test_parse_skipdb_response(self) -> None:
         """Test parsing valid SkipDB response with both intro and outro."""
@@ -54,14 +53,14 @@ class TestSkipSegments(unittest.TestCase):
             },
         }
         parsed = self.manager._parse_skipdb_response(raw_data)
-        self.assertTrue(parsed["has_segments"])
-        self.assertEqual(parsed["source"], "skipdb")
-        self.assertIsNotNone(parsed["intro"])
-        self.assertEqual(parsed["intro"]["start"], 120.5)
-        self.assertEqual(parsed["intro"]["end"], 145.2)
-        self.assertIsNotNone(parsed["outro"])
-        self.assertEqual(parsed["outro"]["start"], 3200.0)
-        self.assertEqual(parsed["outro"]["end"], 3350.0)
+        assert parsed["has_segments"]
+        assert parsed["source"] == "skipdb"
+        assert parsed["intro"] is not None
+        assert parsed["intro"]["start"] == 120.5
+        assert parsed["intro"]["end"] == 145.2
+        assert parsed["outro"] is not None
+        assert parsed["outro"]["start"] == 3200.0
+        assert parsed["outro"]["end"] == 3350.0
 
     def test_parse_skipdb_partial_outro_only(self) -> None:
         """Test parsing response where only outro is present."""
@@ -75,10 +74,10 @@ class TestSkipSegments(unittest.TestCase):
             },
         }
         parsed = self.manager._parse_skipdb_response(raw_data)
-        self.assertTrue(parsed["has_segments"])
-        self.assertIsNone(parsed["intro"])
-        self.assertIsNotNone(parsed["outro"])
-        self.assertEqual(parsed["outro"]["start"], 2850.0)
+        assert parsed["has_segments"]
+        assert parsed["intro"] is None
+        assert parsed["outro"] is not None
+        assert parsed["outro"]["start"] == 2850.0
 
     def test_caching_skip_segments(self) -> None:
         """Test that repeated lookups use internal cache."""
@@ -89,9 +88,7 @@ class TestSkipSegments(unittest.TestCase):
             "source": "skipdb",
         }
         res = asyncio.run(self.manager.get_skip_segments("tt0903747", 1, 1))
-        self.assertTrue(res["has_segments"])
-        self.assertEqual(res["intro"]["start"], 50.0)
+        assert res["has_segments"]
+        assert res["intro"]["start"] == 50.0
 
 
-if __name__ == "__main__":
-    unittest.main()

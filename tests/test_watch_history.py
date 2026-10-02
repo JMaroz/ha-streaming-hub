@@ -6,22 +6,21 @@ import asyncio
 import json
 from pathlib import Path
 import tempfile
-import unittest
 
 from streaming_hub.backend.database import MediaDatabase
 
 
-class TestWatchHistory(unittest.TestCase):
+class TestWatchHistory:
     """Test suite for watch history persistence and shelf logic."""
 
-    def setUp(self) -> None:
+    def setup_method(self, method=None) -> None:
         """Create a temporary SQLite database for each test."""
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "test_history.db"
         self.db = MediaDatabase(self.db_path)
         asyncio.run(self.db.init())
 
-    def tearDown(self) -> None:
+    def teardown_method(self, method=None) -> None:
         """Clean up temporary directory."""
         self.temp_dir.cleanup()
 
@@ -256,12 +255,12 @@ class TestWatchHistory(unittest.TestCase):
 
         # Ensure querying Movie C (never watched) returns None, NOT Movie A or B's progress
         prog_c = asyncio.run(self.db.get_media_progress("movie_C", profile_id="default"))
-        self.assertIsNone(prog_c)
+        assert prog_c is None
 
         # Ensure querying Movie B returns exactly 150.0, not contaminated by Movie A
         prog_b = asyncio.run(self.db.get_media_progress("movie_B", profile_id="default"))
-        self.assertIsNotNone(prog_b)
-        self.assertEqual(prog_b["progress_seconds"], 150.0)
+        assert prog_b is not None
+        assert prog_b["progress_seconds"] == 150.0
 
         # Save progress for Series X S1E1
         asyncio.run(
@@ -282,8 +281,6 @@ class TestWatchHistory(unittest.TestCase):
         prog_y = asyncio.run(
             self.db.get_media_progress("series_Y", profile_id="default", season_number=1, episode_number=1)
         )
-        self.assertIsNone(prog_y)
+        assert prog_y is None
 
 
-if __name__ == "__main__":
-    unittest.main()

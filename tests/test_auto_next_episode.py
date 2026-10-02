@@ -6,15 +6,14 @@ import asyncio
 import json
 from pathlib import Path
 import tempfile
-import unittest
 
 from streaming_hub.backend.database import MediaDatabase
 
 
-class TestAutoNextEpisode(unittest.TestCase):
+class TestAutoNextEpisode:
     """Test suite ensuring sequential episode determination and season boundaries."""
 
-    def setUp(self) -> None:
+    def setup_method(self, method=None) -> None:
         """Create a temporary database with prepopulated series."""
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_path = Path(self.temp_dir.name) / "test_next_ep.db"
@@ -43,31 +42,29 @@ class TestAutoNextEpisode(unittest.TestCase):
                 ("series_test_s2", "series_test", 2, json.dumps(s2_eps)),
             )
 
-    def tearDown(self) -> None:
+    def teardown_method(self, method=None) -> None:
         """Clean up temporary directory."""
         self.temp_dir.cleanup()
 
     def test_next_episode_within_same_season(self) -> None:
         """Test transitioning from S1E1 to S1E2."""
         res = asyncio.run(self.db.get_next_episode("series_test", 1, 1))
-        self.assertIsNotNone(res)
-        self.assertEqual(res["season_number"], 1)
-        self.assertEqual(res["episode_number"], 2)
-        self.assertEqual(res["episode"]["title"], "Chapter Two")
+        assert res is not None
+        assert res["season_number"] == 1
+        assert res["episode_number"] == 2
+        assert res["episode"]["title"] == "Chapter Two"
 
     def test_next_episode_across_season_boundary(self) -> None:
         """Test transitioning from S1E2 to S2E1."""
         res = asyncio.run(self.db.get_next_episode("series_test", 1, 2))
-        self.assertIsNotNone(res)
-        self.assertEqual(res["season_number"], 2)
-        self.assertEqual(res["episode_number"], 1)
-        self.assertEqual(res["episode"]["title"], "Madmax")
+        assert res is not None
+        assert res["season_number"] == 2
+        assert res["episode_number"] == 1
+        assert res["episode"]["title"] == "Madmax"
 
     def test_end_of_series_returns_none(self) -> None:
         """Test that the final episode returns None when no further episodes exist."""
         res = asyncio.run(self.db.get_next_episode("series_test", 2, 1))
-        self.assertIsNone(res)
+        assert res is None
 
 
-if __name__ == "__main__":
-    unittest.main()

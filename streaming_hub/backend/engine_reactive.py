@@ -266,8 +266,7 @@ class ReactiveStreamClient:
             return filename
 
         clean_fn = str(filename).lstrip("/")
-        if clean_fn.startswith("images/"):
-            clean_fn = clean_fn[7:]
+        clean_fn = clean_fn.removeprefix("images/")
 
         clean_base = self.base_url.rstrip("/")
         cdn_host = clean_base.replace("://", "://cdn.")

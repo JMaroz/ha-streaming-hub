@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import sys
-import unittest
 from unittest.mock import AsyncMock, MagicMock
 
 if "aiohttp" not in sys.modules:
     try:
-        import aiohttp
+        import aiohttp  # noqa: F401
     except ImportError:
         import types
 
@@ -26,14 +25,16 @@ if "aiohttp" not in sys.modules:
         sys.modules["aiohttp"] = mock_aiohttp
         sys.modules["aiohttp.abc"] = mock_aiohttp.abc
 
+import pytest
+
 from streaming_hub.backend.models import ProviderSource, ResolvedMedia
 from streaming_hub.backend.sources.manager import SourceManager
 
 
-class TestSourceFailover(unittest.TestCase):
+class TestSourceFailover:
     """Test suite ensuring transparent failover when primary source fails."""
 
-    def setUp(self) -> None:
+    def setup_method(self, method=None) -> None:
         """Initialize SourceManager with mock sources."""
         self.manager = SourceManager()
 
@@ -81,8 +82,8 @@ class TestSourceFailover(unittest.TestCase):
             )
         )
 
-        self.assertIsNotNone(result)
-        self.assertEqual(result.url, "https://cdn.healthy.com/master.m3u8")
+        assert result is not None
+        assert result.url == "https://cdn.healthy.com/master.m3u8"
         mock_failing_adapter.resolve_stream.assert_called_once()
         mock_healthy_adapter.resolve_stream.assert_called_once()
 
@@ -105,9 +106,7 @@ class TestSourceFailover(unittest.TestCase):
 
         self.manager.register_source(mock_bad)
 
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             asyncio.run(self.manager.resolve_stream_with_fallback(bad_source))
 
 
-if __name__ == "__main__":
-    unittest.main()
