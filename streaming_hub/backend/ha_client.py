@@ -166,40 +166,51 @@ class HACoreClient:
                 if any(spk in name_lower for spk in speaker_keywords):
                     continue
 
-                # Determine if it is a genuine video/stream receiver
-                is_stream_capable = (
-                    "cast" in id_lower
-                    or "chromecast" in id_lower
-                    or "google" in id_lower
-                    or "tpm" in id_lower
-                    or "shield" in id_lower
-                    or "mibox" in id_lower
-                    or "firetv" in id_lower
-                    or "appletv" in id_lower
-                    or "apple_tv" in id_lower
-                    or "kodi" in id_lower
-                    or "roku" in id_lower
-                    or "app_id" in attrs
-                    or "media_content_type" in attrs
-                    or attrs.get("app_name") is not None
+                app_id = str(attrs.get("app_id") or "")
+                app_name = str(attrs.get("app_name") or "")
+
+                # Detect virtual Android TV remotes (androidtv_remote integration) which crash on play_media
+                is_android_remote = (
+                    "com.google.android" in app_id.lower()
+                    or "com.google.android" in app_name.lower()
+                    or "remote" in id_lower
+                    or (device_class == "tv" and not ("CC1AD845" in app_id or "Default Media Receiver" in app_name))
                 )
 
-                # Strictly discard non-streaming TV remote controls (e.g. philips_tv, ambilight controls)
-                if not is_stream_capable:
-                    _LOGGER.debug("Skipping TV remote control entity: %s (%s)", entity_id, friendly_name)
+                # Determine if it is a genuine video/stream Cast receiver
+                is_cast_receiver = (
+                    "CC1AD845" in app_id
+                    or "Default Media Receiver" in app_name
+                    or "cast" in id_lower
+                    or "chromecast" in id_lower
+                    or "tpm" in id_lower
+                    or features in (152461, 152463, 152449)
+                )
+
+                if is_android_remote and not ("CC1AD845" in app_id or "Default Media Receiver" in app_name):
+                    _LOGGER.debug(
+                        "Skipping TV remote control entity: %s (%s) [app_id: %s, class: %s]",
+                        entity_id,
+                        friendly_name,
+                        app_id,
+                        device_class,
+                    )
                     continue
 
-                # Compute preference score for stream receivers (prefer genuine Cast receivers over remotes)
+                if not is_cast_receiver:
+                    _LOGGER.debug("Skipping non-cast entity: %s (%s)", entity_id, friendly_name)
+                    continue
+
+                # Compute preference score for stream receivers
                 score = 0
+                if "CC1AD845" in app_id or "Default Media Receiver" in app_name:
+                    score += 50
                 if any(k in id_lower for k in ("cast", "chromecast", "tpm")):
+                    score += 25
+                if features in (152461, 152463):
                     score += 20
-                if "app_id" in attrs:
+                if current_state in ("playing", "paused", "buffering", "on"):
                     score += 10
-                if "media_content_type" in attrs:
-                    score += 5
-                # Penalize secondary / duplicate remote entities like _2, _remote, _tv_remote, _control
-                if any(id_lower.endswith(k) or f"{k}_" in id_lower for k in ("_2", "_3", "_remote", "_control")):
-                    score -= 15
                 if not any(f"_{i}" in id_lower for i in range(2, 10)):
                     score += 5
 
@@ -349,56 +360,6 @@ class HACoreClient:
                             return True, entity_id
                 except Exception as err:
                     _LOGGER.debug("Fallback play_media mime error: %s", err)
-
-        # Fallback 3: Smart companion cast entity fallback (e.g. tpm191e / chromecast / google_tv)
-        if not success:
-            try:
-                companion_players = await self.get_media_players()
-                clean_target = entity_id.replace("media_player.", "").split("_")[0]
-                base_target = entity_id
-                for suffix in ("_2", "_3", "_remote", "_tv_remote", "_tv"):
-                    if base_target.endswith(suffix):
-                        base_target = base_target[: -len(suffix)]
-                        break
-
-                alt_player = next(
-                    (
-                        p
-                        for p in companion_players
-                        if p.is_cast
-                        and p.entity_id != entity_id
-                        and (
-                            p.entity_id == base_target
-                            or clean_target in p.entity_id.lower()
-                            or clean_target in p.name.lower()
-                            or "tpm" in p.entity_id.lower()
-                            or "cast" in p.entity_id.lower()
-                        )
-                    ),
-                    None,
-                )
-                if alt_player:
-                    _LOGGER.info(
-                        "Attempting automatic fallback cast to companion device %s (%s)...",
-                        alt_player.entity_id,
-                        alt_player.name,
-                    )
-                    alt_payload = dict(payload)
-                    alt_payload["entity_id"] = alt_player.entity_id
-                    async with (
-                        aiohttp.ClientSession() as session,
-                        session.post(
-                            f"{self.base_url}/services/media_player/play_media",
-                            headers=self._get_headers(),
-                            json=alt_payload,
-                            timeout=aiohttp.ClientTimeout(total=25),
-                        ) as resp,
-                    ):
-                        if resp.status in (200, 201):
-                            _LOGGER.info("Automatic fallback cast to %s succeeded!", alt_player.entity_id)
-                            return True, alt_player.entity_id
-            except Exception as alt_err:
-                _LOGGER.debug("Companion fallback cast error: %s", alt_err)
 
         return False, entity_id
 

@@ -5,6 +5,15 @@
 (function () {
   "use strict";
 
+  function getProxiedImageUrl(url) {
+    if (!url) return "";
+    if (url.startsWith("data:")) return url;
+    if (url.includes("image.tmdb.org")) return url;
+    if (url.includes("unsplash.com")) return url;
+    return `${state.ingressPath}/api/proxy/image?url=${encodeURIComponent(url)}`;
+  }
+
+
   // Application State
   const state = {
     activeProfileId: localStorage.getItem("streaming_hub_active_profile_id") || "default",
@@ -814,6 +823,18 @@
       if (resp.ok) {
         state.mediaPlayers = await resp.json();
         renderPlayersSelect();
+
+        // Restore previous selection if it still exists, otherwise fallback to browser
+        if (state.selectedDevice && state.selectedDevice !== "browser") {
+          const stillExists = state.mediaPlayers.find((p) => p.entity_id === state.selectedDevice);
+          if (!stillExists) {
+            state.selectedDevice = "browser";
+          }
+        }
+        if (elements.deviceSelect) {
+          elements.deviceSelect.value = state.selectedDevice;
+        }
+        updatePlayButtonText();
       }
     } catch (err) {
       console.warn("Could not load players:", err);
@@ -1178,7 +1199,7 @@
     const card = document.createElement("div");
     card.className = "media-card";
 
-    const posterSrc = item.poster_url || DEFAULT_POSTER_SVG;
+    const posterSrc = getProxiedImageUrl(item.poster_url) || DEFAULT_POSTER_SVG;
     const isTv =
       item.type === "tv" ||
       !!item.seasons ||
@@ -1319,7 +1340,7 @@
       return;
     }
 
-    const backdrop = item.backdrop_url || item.poster_url;
+    const backdrop = getProxiedImageUrl(item.backdrop_url) || getProxiedImageUrl(item.poster_url);
     if (!backdrop) {
       elements.heroSection.classList.add("hidden");
       return;
@@ -1459,7 +1480,7 @@
       const card = document.createElement("div");
       card.className = "media-card";
 
-      const posterSrc = item.poster_url || "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='450' viewBox='0 0 300 450'%3E%3Crect width='300' height='450' fill='%23182030'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%2364748b' font-family='sans-serif' font-size='18'%3ELocandina%3C/text%3E%3C/svg%3E";
+      const posterSrc = getProxiedImageUrl(item.poster_url) || "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='450' viewBox='0 0 300 450'%3E%3Crect width='300' height='450' fill='%23182030'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%2364748b' font-family='sans-serif' font-size='18'%3ELocandina%3C/text%3E%3C/svg%3E";
       const isTv = item.type === "tv" || !!item.seasons;
       const typeLabel = isTv ? "Serie TV" : "Film";
 
@@ -1516,7 +1537,7 @@
       const card = document.createElement("div");
       card.className = "media-card";
 
-      const posterSrc = item.poster_url || "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='450' viewBox='0 0 300 450'%3E%3Crect width='300' height='450' fill='%23182030'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%2364748b' font-family='sans-serif' font-size='18'%3ELocandina%3C/text%3E%3C/svg%3E";
+      const posterSrc = getProxiedImageUrl(item.poster_url) || "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='450' viewBox='0 0 300 450'%3E%3Crect width='300' height='450' fill='%23182030'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%2364748b' font-family='sans-serif' font-size='18'%3ELocandina%3C/text%3E%3C/svg%3E";
       const isTv = item.media_type === "tv";
       const typeLabel = isTv ? "Serie TV" : "Film";
 
@@ -1639,7 +1660,7 @@
       const card = document.createElement("div");
       card.className = "continue-card";
 
-      const imgSrc = item.backdrop_url || item.poster_url || "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=500&auto=format&fit=crop&q=60";
+      const imgSrc = getProxiedImageUrl(item.backdrop_url) || getProxiedImageUrl(item.poster_url) || "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=500&auto=format&fit=crop&q=60";
       const isTv = item.media_type === "tv";
 
       let epBadgeText = "";
@@ -1740,9 +1761,9 @@
     elements.modalTypeBadge.textContent = mediaType === "tv" ? "Serie TV" : "Film";
     elements.modalPlot.textContent = item.description || "Caricamento trama arricchita...";
 
-    const poster = item.poster_url || "";
+    const poster = getProxiedImageUrl(item.poster_url) || "";
     elements.modalPoster.src = poster;
-    const backdrop = item.backdrop_url || poster;
+    const backdrop = getProxiedImageUrl(item.backdrop_url) || poster;
     elements.modalBackdropImg.style.backgroundImage = backdrop ? `url("${backdrop}")` : "";
 
     // Set initial favorite UI from cached Set
@@ -1761,6 +1782,9 @@
 
     elements.detailsModal.classList.remove("hidden");
     document.body.style.overflow = "hidden";
+
+    // Refresh players list lazily upon modal opening so any newly active cast devices appear
+    loadPlayers();
 
     // Fetch full enriched details and watch progress concurrently
     try {
@@ -1808,7 +1832,7 @@
 
   function updateModalWithDetails(item, targetEpisode = null) {
     if (item.description) elements.modalPlot.textContent = item.description;
-    if (item.backdrop_url) elements.modalBackdropImg.style.backgroundImage = `url("${item.backdrop_url}")`;
+    if (item.backdrop_url) elements.modalBackdropImg.style.backgroundImage = `url("${getProxiedImageUrl(item.backdrop_url)}")`;
     if (item.duration) elements.modalDuration.textContent = `${item.duration} min`;
     if (item.rating) elements.modalRating.textContent = `★ ${item.rating}`;
     updateCertBadge(item.certification);
@@ -3261,7 +3285,7 @@
         elements.castBarDevice.textContent = data.device_name;
       }
       if (data.poster_url && elements.castBarPoster && !elements.castBarPoster.src) {
-        elements.castBarPoster.src = data.poster_url;
+        elements.castBarPoster.src = getProxiedImageUrl(data.poster_url);
       }
 
       updateCastStatusUI(state.castSession.state);

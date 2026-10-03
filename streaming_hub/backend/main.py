@@ -11,6 +11,7 @@ import logging
 import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import aiohttp
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -1318,6 +1319,48 @@ async def control_cast(req: CastControlRequest) -> dict[str, Any]:
 
 
 # Proxy stream endpoints
+
+
+@app.get("/api/proxy/image")
+async def proxy_image(url: str = Query(..., description="Image URL to proxy")) -> Response:
+    """Proxy image requests to bypass CORS and referer blocks."""
+    if not url or not url.startswith("http"):
+        raise HTTPException(status_code=400, detail="Invalid URL")
+
+    try:
+        parsed = urlparse(url)
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "Referer": f"{parsed.scheme}://{parsed.netloc}/",
+            "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        }
+
+        session = await stream_proxy._get_client_session()
+        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            if resp.status != 200:
+                raise HTTPException(status_code=resp.status, detail="Image not found or blocked")
+
+            content = await resp.read()
+            content_type = resp.headers.get("Content-Type", "image/jpeg")
+            return Response(
+                content=content,
+                media_type=content_type,
+                headers={
+                    "Cache-Control": "public, max-age=86400",
+                    "Access-Control-Allow-Origin": "*",
+                },
+            )
+    except HTTPException:
+        raise
+    except Exception as err:
+        _LOGGER.error("Image proxy error for %s: %s", url, err)
+        raise HTTPException(status_code=502, detail="Failed to fetch image") from err
+
+
+
 @app.api_route("/stream/{token}", methods=["GET", "HEAD"])
 async def get_stream(token: str, request: Request, url: str | None = None) -> Response:
     """Stream or sub-playlist proxy supporting GET and HEAD."""
