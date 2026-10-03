@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.5.1](https://github.com/JMaroz/streaming-hub-ha/compare/v2.5.0...v2.5.1) (2026-10-03)
+
+
+### Bug Fixes
+
+* **proxy:** add image proxy endpoint and wrapper to fix broken external posters ([b648351](https://github.com/JMaroz/streaming-hub-ha/commit/b64835155c6f520ce22b049f32ea79436dff5f38))
+
 ## [2.5.0](https://github.com/JMaroz/streaming-hub-ha/compare/v2.4.0...v2.5.0) (2026-10-02)
 
 
