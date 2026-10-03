@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.6.1](https://github.com/JMaroz/streaming-hub-ha/compare/v2.6.0...v2.6.1) (2026-10-03)
+
+
+### Bug Fixes
+
+* **catalog:** resolve home carousels and latest arrivals grid coexistence ([f9d1e56](https://github.com/JMaroz/streaming-hub-ha/commit/f9d1e56dd30b64ea5c54738a50561d3ba811e547))
+
 ## [2.6.0](https://github.com/JMaroz/streaming-hub-ha/compare/v2.5.1...v2.6.0) (2026-10-03)
 
 
