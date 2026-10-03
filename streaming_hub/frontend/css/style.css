@@ -2269,6 +2269,11 @@ body.cast-active {
   margin-bottom: 40px;
 }
 
+.home-carousels-section {
+  width: 100%;
+  margin-bottom: 32px;
+}
+
 .catalog-carousels {
   display: flex;
   flex-direction: column;

@@ -559,13 +559,90 @@ class ReactiveStreamClient:
         return results
 
     async def get_homepage_carousels(self) -> tuple[Movie | TvSeries | None, list[dict[str, Any]]]:
-        """Fetch editorial and thematic sliders from the homepage."""
+        """Fetch editorial and thematic sliders from the homepage or media catalog hubs."""
         inertia_headers = {
             "Accept": "text/html,application/xhtml+xml",
             "X-Inertia": "true",
             "X-Requested-With": "XMLHttpRequest",
         }
-        candidate_urls = [f"{self.base_url}it", self.base_url]
+        candidate_urls = [f"{self.base_url}it/browse", f"{self.base_url}browse", f"{self.base_url}it", self.base_url]
+
+        label_translations = {
+            "latest": "Nuove Uscite",
+            "trending": "Di Tendenza",
+            "top_10": "Top 10 della Settimana",
+            "top10": "Top 10",
+            "popular": "I Più Popolari",
+            "movies": "Film del Momento",
+            "tv": "Serie TV del Momento",
+            "series": "Serie TV del Momento",
+            "suggested": "Consigliati per Te",
+            "recommended": "Consigliati",
+        }
+
+        def _parse_sliders_and_hero(
+            props: dict[str, Any], default_hero: Movie | TvSeries | None = None
+        ) -> tuple[Movie | TvSeries | None, list[dict[str, Any]]]:
+            hero_item: Movie | TvSeries | None = default_hero
+            billboard_raw = props.get("billboard") or props.get("featured") or props.get("hero")
+            if (
+                hero_item is None
+                and isinstance(billboard_raw, dict)
+                and billboard_raw.get("id")
+                and not billboard_raw.get("coming_soon")
+                and not ("uploaded_at" in billboard_raw and billboard_raw["uploaded_at"] is None)
+            ):
+                if billboard_raw.get("type") == "tv":
+                    hero_item = self._item_to_tv_series(billboard_raw)
+                else:
+                    hero_item = self._item_to_movie(billboard_raw)
+
+            sliders = props.get("sliders")
+            if not sliders or not isinstance(sliders, list):
+                return hero_item, []
+
+            parsed: list[dict[str, Any]] = []
+            for slider in sliders:
+                if not isinstance(slider, dict):
+                    continue
+                name = str(slider.get("name") or "").strip()
+                if name.lower() in ("upcoming", "coming_soon", "prossimamente", "in_arrivo", "in-arrivo"):
+                    continue
+
+                title = str(slider.get("label") or slider.get("title") or "").strip()
+                if not title and name:
+                    title = label_translations.get(name.lower(), name.replace("_", " ").title())
+                if not title:
+                    title = "In Evidenza"
+
+                raw_titles = slider.get("titles") or []
+                if not isinstance(raw_titles, list) or not raw_titles:
+                    continue
+
+                items: list[Movie | TvSeries] = []
+                for t in raw_titles:
+                    if not isinstance(t, dict) or not t.get("id"):
+                        continue
+                    if t.get("coming_soon") is True or ("uploaded_at" in t and t.get("uploaded_at") is None):
+                        continue
+                    if t.get("type") == "tv":
+                        items.append(self._item_to_tv_series(t))
+                    else:
+                        items.append(self._item_to_movie(t))
+
+                if items:
+                    if hero_item is None and name in ("billboard", "featured", "hero", "trending"):
+                        hero_item = items[0]
+                    parsed.append(
+                        {
+                            "id": name or f"slider_{len(parsed) + 1}",
+                            "title": title,
+                            "items": items,
+                        }
+                    )
+            return hero_item, parsed
+
+        # 1. First attempt candidate home/browse URLs
         for url in candidate_urls:
             try:
                 html_text = await self._request(url, headers=inertia_headers)
@@ -575,84 +652,65 @@ class ReactiveStreamClient:
                     with contextlib.suppress(Exception):
                         props = json.loads(html_text).get("props", {})
 
-                sliders = props.get("sliders")
-                if not sliders or not isinstance(sliders, list):
-                    continue
-
-                hero_item: Movie | TvSeries | None = None
-                billboard_raw = props.get("billboard") or props.get("featured") or props.get("hero")
-                if (
-                    isinstance(billboard_raw, dict)
-                    and billboard_raw.get("id")
-                    and not billboard_raw.get("coming_soon")
-                    and not ("uploaded_at" in billboard_raw and billboard_raw["uploaded_at"] is None)
-                ):
-                    if billboard_raw.get("type") == "tv":
-                        hero_item = self._item_to_tv_series(billboard_raw)
-                    else:
-                        hero_item = self._item_to_movie(billboard_raw)
-
-                parsed_carousels: list[dict[str, Any]] = []
-                label_translations = {
-                    "latest": "Nuove Uscite",
-                    "trending": "Di Tendenza",
-                    "top_10": "Top 10 della Settimana",
-                    "top10": "Top 10",
-                    "popular": "I Più Popolari",
-                    "movies": "Film del Momento",
-                    "tv": "Serie TV del Momento",
-                    "series": "Serie TV del Momento",
-                    "suggested": "Consigliati per Te",
-                    "recommended": "Consigliati",
-                }
-
-                for slider in sliders:
-                    if not isinstance(slider, dict):
-                        continue
-                    name = str(slider.get("name") or "").strip()
-                    # Exclude sliders dedicated to unreleased or upcoming titles
-                    if name.lower() in ("upcoming", "coming_soon", "prossimamente", "in_arrivo", "in-arrivo"):
-                        continue
-
-                    title = str(slider.get("label") or slider.get("title") or "").strip()
-                    if not title and name:
-                        title = label_translations.get(name.lower(), name.replace("_", " ").title())
-                    if not title:
-                        title = "In Evidenza"
-
-                    raw_titles = slider.get("titles") or []
-                    if not isinstance(raw_titles, list) or not raw_titles:
-                        continue
-
-                    items: list[Movie | TvSeries] = []
-                    for t in raw_titles:
-                        if not isinstance(t, dict) or not t.get("id"):
-                            continue
-                        # Exclude unreleased titles
-                        if t.get("coming_soon") is True or ("uploaded_at" in t and t.get("uploaded_at") is None):
-                            continue
-                        if t.get("type") == "tv":
-                            items.append(self._item_to_tv_series(t))
-                        else:
-                            items.append(self._item_to_movie(t))
-
-                    if items:
-                        if hero_item is None and name in ("billboard", "featured", "hero", "trending"):
-                            hero_item = items[0]
-                        parsed_carousels.append(
-                            {
-                                "id": name or f"slider_{len(parsed_carousels) + 1}",
-                                "title": title,
-                                "items": items,
-                            }
-                        )
-
-                if parsed_carousels:
-                    if hero_item is None and parsed_carousels[0]["items"]:
-                        hero_item = parsed_carousels[0]["items"][0]
-                    return hero_item, parsed_carousels
+                hero_item, carousels = _parse_sliders_and_hero(props)
+                if carousels:
+                    if hero_item is None and carousels[0]["items"]:
+                        hero_item = carousels[0]["items"][0]
+                    return hero_item, carousels
             except Exception as err:
                 _LOGGER.debug("Could not fetch carousels from %s: %s", url, err)
+
+        # 2. Resilient fallback: fetch sliders from /it/movies and /it/tv-shows in parallel
+        try:
+            movie_task = self._request(f"{self.base_url}it/movies", headers=inertia_headers)
+            tv_task = self._request(f"{self.base_url}it/tv-shows", headers=inertia_headers)
+            movie_html, tv_html = await asyncio.gather(movie_task, tv_task, return_exceptions=True)
+
+            combined_carousels: list[dict[str, Any]] = []
+            selected_hero: Movie | TvSeries | None = None
+
+            if isinstance(movie_html, str):
+                m_props = {}
+                with contextlib.suppress(Exception):
+                    m_props = json.loads(movie_html).get("props", {})
+                if not m_props:
+                    with contextlib.suppress(Exception):
+                        m_props = self.extract_data_page(movie_html).get("props", {})
+                m_hero, m_carousels = _parse_sliders_and_hero(m_props)
+                if m_hero and not selected_hero:
+                    selected_hero = m_hero
+                for c in m_carousels:
+                    cid = c.get("id")
+                    if cid == "trending":
+                        c["title"] = "Film del Momento"
+                    elif cid == "latest":
+                        c["title"] = "Nuove Uscite Film"
+                    combined_carousels.append(c)
+
+            if isinstance(tv_html, str):
+                tv_props = {}
+                with contextlib.suppress(Exception):
+                    tv_props = json.loads(tv_html).get("props", {})
+                if not tv_props:
+                    with contextlib.suppress(Exception):
+                        tv_props = self.extract_data_page(tv_html).get("props", {})
+                tv_hero, tv_carousels = _parse_sliders_and_hero(tv_props)
+                if tv_hero and not selected_hero:
+                    selected_hero = tv_hero
+                for c in tv_carousels:
+                    cid = c.get("id")
+                    if cid == "trending":
+                        c["title"] = "Serie TV del Momento"
+                    elif cid == "latest":
+                        c["title"] = "Nuove Uscite Serie TV"
+                    combined_carousels.append(c)
+
+            if combined_carousels:
+                if selected_hero is None and combined_carousels[0]["items"]:
+                    selected_hero = combined_carousels[0]["items"][0]
+                return selected_hero, combined_carousels
+        except Exception as err:
+            _LOGGER.debug("Could not fetch carousels fallback from /it/movies and /it/tv-shows: %s", err)
 
         return None, []
 

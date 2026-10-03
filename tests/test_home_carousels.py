@@ -235,3 +235,48 @@ class TestHomeCarousels:
             # Inside trending, only 'Film Disponibile' must remain
             assert len(carousels[0]["items"]) == 1
             assert carousels[0]["items"][0].title == "Film Disponibile"
+
+    @pytest.mark.asyncio
+    async def test_get_homepage_carousels_fallback_to_movies_and_tv(self) -> None:
+        """Test fallback to /it/movies and /it/tv-shows when home candidate URLs have no sliders."""
+        client = ReactiveStreamClient(base_url="https://streaming.example.com/")
+
+        empty_props = json.dumps({"props": {"sliders": []}})
+        movies_props = json.dumps({
+            "props": {
+                "sliders": [
+                    {
+                        "name": "trending",
+                        "titles": [{"id": 501, "name": "Film Popolare", "slug": "film-pop", "type": "movie"}],
+                    }
+                ]
+            }
+        })
+        tv_props = json.dumps({
+            "props": {
+                "sliders": [
+                    {
+                        "name": "trending",
+                        "titles": [{"id": 601, "name": "Serie Popolare", "slug": "serie-pop", "type": "tv"}],
+                    }
+                ]
+            }
+        })
+
+        async def mock_request_side_effect(url: str, headers: dict | None = None) -> str:
+            if "movies" in url:
+                return movies_props
+            if "tv-shows" in url:
+                return tv_props
+            return empty_props
+
+        with patch.object(client, "_request", new_callable=AsyncMock) as mock_req:
+            mock_req.side_effect = mock_request_side_effect
+            hero, carousels = await client.get_homepage_carousels()
+
+            assert hero is not None
+            assert hero.title == "Film Popolare"
+            assert len(carousels) == 2
+            assert carousels[0]["title"] == "Film del Momento"
+            assert carousels[1]["title"] == "Serie TV del Momento"
+

@@ -109,6 +109,7 @@
     heroInfoBtn: document.getElementById("hero-info-btn"),
     sectionTitle: document.getElementById("section-title"),
     sectionCount: document.getElementById("section-count"),
+    homeCarouselsSection: document.getElementById("home-carousels-section"),
     catalogCarousels: document.getElementById("catalog-carousels"),
     catalogGrid: document.getElementById("catalog-grid"),
     loadingSpinner: document.getElementById("loading-spinner"),
@@ -809,6 +810,7 @@
     if (elements.continueSection) elements.continueSection.classList.add("hidden");
     if (elements.favoritesSection) elements.favoritesSection.classList.add("hidden");
     if (elements.watchedSection) elements.watchedSection.classList.add("hidden");
+    if (elements.homeCarouselsSection) elements.homeCarouselsSection.classList.add("hidden");
     showLoading(true);
 
     // Refresh all profile-scoped data immediately
@@ -1004,6 +1006,7 @@
       if (elements.continueSection) elements.continueSection.classList.add("hidden");
       if (elements.favoritesSection) elements.favoritesSection.classList.add("hidden");
       if (elements.watchedSection) elements.watchedSection.classList.add("hidden");
+      if (elements.homeCarouselsSection) elements.homeCarouselsSection.classList.add("hidden");
     } else if (!append) {
       if (elements.continueSection && elements.continueRow && elements.continueRow.children.length > 0) {
         elements.continueSection.classList.remove("hidden");
@@ -1088,29 +1091,31 @@
 
     try {
       if (isHome && page === 1 && !append) {
-        try {
-          const homeUrl = apiUrl(
+        // Load Home Thematic Carousels in background
+        fetch(
+          apiUrl(
             `api/catalog/home?source=${state.activeSource}&profile_id=${encodeURIComponent(state.activeProfileId)}`
-          );
-          const homeResp = await fetch(homeUrl);
-          if (homeResp.ok) {
-            const homeData = await homeResp.json();
-            if (homeData.mode === "carousels" && homeData.carousels && homeData.carousels.length > 0) {
-              state.hasMore = false;
+          )
+        )
+          .then((r) => (r.ok ? r.json() : null))
+          .then((homeData) => {
+            if (homeData && homeData.carousels && homeData.carousels.length > 0) {
               renderHomeCarousels(homeData.carousels);
               if (homeData.hero) {
                 updateHero(homeData.hero);
-              } else if (homeData.carousels[0] && homeData.carousels[0].items && homeData.carousels[0].items.length > 0) {
-                updateHero(homeData.carousels[0].items[0]);
-              } else {
-                elements.heroSection.classList.add("hidden");
               }
-              return;
+            } else if (elements.homeCarouselsSection) {
+              elements.homeCarouselsSection.classList.add("hidden");
             }
-          }
-        } catch (homeErr) {
-          console.warn("Could not load home carousels, falling back to grid:", homeErr);
-        }
+          })
+          .catch((homeErr) => {
+            console.warn("Could not load home carousels:", homeErr);
+            if (elements.homeCarouselsSection) {
+              elements.homeCarouselsSection.classList.add("hidden");
+            }
+          });
+      } else if (elements.homeCarouselsSection) {
+        elements.homeCarouselsSection.classList.add("hidden");
       }
 
       const url = apiUrl(
@@ -1132,7 +1137,9 @@
         state.catalogItems = results;
         renderGrid(state.catalogItems);
         if (isHome && state.catalogItems.length > 0) {
-          updateHero(state.catalogItems[0]);
+          if (!elements.heroSection || elements.heroSection.classList.contains("hidden")) {
+            updateHero(state.catalogItems[0]);
+          }
         } else {
           elements.heroSection.classList.add("hidden");
         }
@@ -1155,6 +1162,7 @@
     if (elements.continueSection) elements.continueSection.classList.add("hidden");
     if (elements.favoritesSection) elements.favoritesSection.classList.add("hidden");
     if (elements.watchedSection) elements.watchedSection.classList.add("hidden");
+    if (elements.homeCarouselsSection) elements.homeCarouselsSection.classList.add("hidden");
 
     elements.sectionTitle.textContent = `Risultati per "${query}"`;
 
@@ -1188,6 +1196,7 @@
       if (elements.continueSection) elements.continueSection.classList.add("hidden");
       if (elements.favoritesSection) elements.favoritesSection.classList.add("hidden");
       if (elements.watchedSection) elements.watchedSection.classList.add("hidden");
+      if (elements.homeCarouselsSection) elements.homeCarouselsSection.classList.add("hidden");
     }
 
     elements.sectionTitle.textContent = `Genere: ${genre}`;
@@ -1482,14 +1491,15 @@
 
   // Render Home Thematic Carousels
   function renderHomeCarousels(carousels) {
-    if (elements.catalogGrid) elements.catalogGrid.classList.add("hidden");
     if (!elements.catalogCarousels) return;
-    elements.catalogCarousels.classList.remove("hidden");
+    if (!carousels || carousels.length === 0) {
+      if (elements.homeCarouselsSection) elements.homeCarouselsSection.classList.add("hidden");
+      elements.catalogCarousels.innerHTML = "";
+      return;
+    }
+
     elements.catalogCarousels.innerHTML = "";
-    elements.emptyState.classList.add("hidden");
-    elements.sectionTitle.textContent = "Home";
-    const totalTitles = (carousels || []).reduce((acc, c) => acc + (c.items ? c.items.length : 0), 0);
-    elements.sectionCount.textContent = `${(carousels || []).length} sezioni (${totalTitles} titoli)`;
+    if (elements.homeCarouselsSection) elements.homeCarouselsSection.classList.remove("hidden");
 
     const fragment = document.createDocumentFragment();
     (carousels || []).forEach((carousel) => {
@@ -1527,7 +1537,6 @@
 
   // Render Grid Cards
   function renderGrid(items) {
-    if (elements.catalogCarousels) elements.catalogCarousels.classList.add("hidden");
     if (elements.catalogGrid) elements.catalogGrid.classList.remove("hidden");
     elements.catalogGrid.innerHTML = "";
     elements.sectionCount.textContent = `${items.length} titoli`;
