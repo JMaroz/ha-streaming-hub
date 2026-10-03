@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from ..engine_reactive import ReactiveStreamClient
 from ..models import Movie, ProviderSource, ResolvedMedia, TvSeason, TvSeries
@@ -46,6 +47,24 @@ class ReactiveSource(BaseSource):
     def is_enabled(self) -> bool:
         """Check if source is enabled."""
         return self._enabled and self._client is not None
+
+    @property
+    def has_carousels(self) -> bool:
+        """Return True if this source provides thematic/editorial homepage carousels."""
+        return self.is_enabled
+
+    async def get_carousels(self) -> tuple[Movie | TvSeries | None, list[dict[str, Any]]]:
+        """Fetch homepage carousels from the reactive client."""
+        if not self.is_enabled or not self._client:
+            return None, []
+        hero_item, carousels = await self._client.get_homepage_carousels()
+        if hero_item and self.source_id not in hero_item.catalogs:
+            hero_item.catalogs.append(self.source_id)
+        for c in carousels:
+            for it in c.get("items", []):
+                if self.source_id not in it.catalogs:
+                    it.catalogs.append(self.source_id)
+        return hero_item, carousels
 
     async def get_latest_movies(self, page: int = 1) -> list[Movie]:
         """Fetch latest movies."""

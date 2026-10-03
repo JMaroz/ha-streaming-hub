@@ -105,6 +105,29 @@ class SourceManager:
                 interleaved.append(merged_series[i])
         return interleaved
 
+    async def get_home_carousels(
+        self,
+        source_filter: str = "all",
+    ) -> tuple[Movie | TvSeries | None, list[dict[str, Any]]]:
+        """Fetch home carousels and hero title from enabled carousel-capable sources."""
+        sources = self.get_enabled_sources(source_filter)
+        if not sources:
+            return None, []
+
+        carousel_sources = [s for s in sources if getattr(s, "has_carousels", False)]
+        if not carousel_sources:
+            return None, []
+
+        for src in carousel_sources:
+            try:
+                hero, carousels = await src.get_carousels()
+                if carousels:
+                    return hero, carousels
+            except Exception as err:
+                _LOGGER.warning("Error fetching home carousels from %s: %s", src.source_id, err)
+
+        return None, []
+
     async def search(
         self,
         query: str,

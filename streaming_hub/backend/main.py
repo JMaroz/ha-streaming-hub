@@ -10,6 +10,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import random
 from typing import Any
 from urllib.parse import urlparse
 
@@ -594,6 +595,106 @@ async def trakt_scrobble(req: TraktScrobbleRequest) -> dict[str, Any]:
         progress_percent=req.progress_percent,
     )
     return {"status": "ok", "scrobbled": success}
+
+
+@app.get("/api/catalog/home")
+async def get_home_catalog(
+    source: str = Query("all"),
+    profile_id: str = Query("default"),
+) -> dict[str, Any]:
+    """Retrieve home view catalog: editorial carousels when supported, or indicator for grid mode."""
+    profile = get_profile_by_id(profile_id)
+    active_country = (getattr(profile, "country", None) or CONFIG.get("country", "IT")).upper()
+
+    hero_item, raw_carousels = await source_manager.get_home_carousels(source_filter=source)
+
+    if not raw_carousels:
+        return {
+            "mode": "grid",
+            "source": source,
+            "profile_id": profile.id,
+            "hero": None,
+            "carousels": [],
+        }
+
+    # 1. Collect all items across carousels (plus hero) to enrich in one batch
+    all_items: list[Movie | TvSeries] = []
+    if hero_item:
+        all_items.append(hero_item)
+    for c in raw_carousels:
+        all_items.extend(it for it in c.get("items", []) if isinstance(it, (Movie, TvSeries)))
+
+    await db.enrich_items_with_cached_metadata(all_items)
+
+    # 2. Filter carousels by profile Parental Control and prune empty ones
+    def is_item_available(it: Movie | TvSeries) -> bool:
+        if isinstance(it, Movie) and it.sources:
+            return any(s.available for s in it.sources)
+        return True
+
+    filtered_carousels: list[dict[str, Any]] = []
+    allowed_pool: list[Movie | TvSeries] = []
+
+    for c in raw_carousels:
+        allowed_items = [
+            it
+            for it in c.get("items", [])
+            if isinstance(it, (Movie, TvSeries)) and is_title_allowed_for_profile(it, profile) and is_item_available(it)
+        ]
+        # Prune carousel if empty after parental control and availability filter
+        if not allowed_items:
+            continue
+
+        allowed_pool.extend(allowed_items)
+        serialized_items = [it.to_dict() for it in allowed_items]
+        for it_dict in serialized_items:
+            it_dict["streaming_availability"] = extract_streaming_availability(it_dict, active_country)
+
+        filtered_carousels.append(
+            {
+                "id": c.get("id"),
+                "title": c.get("title"),
+                "count": len(serialized_items),
+                "items": serialized_items,
+            }
+        )
+
+    # If filtering pruned all carousels, return grid mode
+    if not filtered_carousels:
+        return {
+            "mode": "grid",
+            "source": source,
+            "profile_id": profile.id,
+            "hero": None,
+            "carousels": [],
+        }
+
+    # 3. Hero banner selection:
+    # Check if billboard/featured hero is allowed and available
+    selected_hero: Movie | TvSeries | None = None
+    if hero_item and is_title_allowed_for_profile(hero_item, profile) and is_item_available(hero_item):
+        selected_hero = hero_item
+    elif allowed_pool:
+        # Pick candidate with valid backdrop or poster
+        candidates_with_backdrop = [it for it in allowed_pool if it.backdrop_url or it.poster_url]
+        if candidates_with_backdrop:
+            high_rated = [it for it in candidates_with_backdrop if (it.rating or 0.0) >= 7.0]
+            selected_hero = random.choice(high_rated) if high_rated else random.choice(candidates_with_backdrop)
+        else:
+            selected_hero = allowed_pool[0]
+
+    hero_dict = None
+    if selected_hero:
+        hero_dict = selected_hero.to_dict()
+        hero_dict["streaming_availability"] = extract_streaming_availability(hero_dict, active_country)
+
+    return {
+        "mode": "carousels",
+        "source": source,
+        "profile_id": profile.id,
+        "hero": hero_dict,
+        "carousels": filtered_carousels,
+    }
 
 
 @app.get("/api/catalog/latest")
@@ -1358,7 +1459,6 @@ async def proxy_image(url: str = Query(..., description="Image URL to proxy")) -
     except Exception as err:
         _LOGGER.error("Image proxy error for %s: %s", url, err)
         raise HTTPException(status_code=502, detail="Failed to fetch image") from err
-
 
 
 @app.api_route("/stream/{token}", methods=["GET", "HEAD"])

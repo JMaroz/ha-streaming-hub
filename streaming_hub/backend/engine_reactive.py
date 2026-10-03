@@ -558,6 +558,104 @@ class ReactiveStreamClient:
 
         return results
 
+    async def get_homepage_carousels(self) -> tuple[Movie | TvSeries | None, list[dict[str, Any]]]:
+        """Fetch editorial and thematic sliders from the homepage."""
+        inertia_headers = {
+            "Accept": "text/html,application/xhtml+xml",
+            "X-Inertia": "true",
+            "X-Requested-With": "XMLHttpRequest",
+        }
+        candidate_urls = [f"{self.base_url}it", self.base_url]
+        for url in candidate_urls:
+            try:
+                html_text = await self._request(url, headers=inertia_headers)
+                page_data = self.extract_data_page(html_text)
+                props = page_data.get("props", {})
+                if not props and html_text.strip().startswith("{"):
+                    with contextlib.suppress(Exception):
+                        props = json.loads(html_text).get("props", {})
+
+                sliders = props.get("sliders")
+                if not sliders or not isinstance(sliders, list):
+                    continue
+
+                hero_item: Movie | TvSeries | None = None
+                billboard_raw = props.get("billboard") or props.get("featured") or props.get("hero")
+                if (
+                    isinstance(billboard_raw, dict)
+                    and billboard_raw.get("id")
+                    and not billboard_raw.get("coming_soon")
+                    and not ("uploaded_at" in billboard_raw and billboard_raw["uploaded_at"] is None)
+                ):
+                    if billboard_raw.get("type") == "tv":
+                        hero_item = self._item_to_tv_series(billboard_raw)
+                    else:
+                        hero_item = self._item_to_movie(billboard_raw)
+
+                parsed_carousels: list[dict[str, Any]] = []
+                label_translations = {
+                    "latest": "Nuove Uscite",
+                    "trending": "Di Tendenza",
+                    "top_10": "Top 10 della Settimana",
+                    "top10": "Top 10",
+                    "popular": "I Più Popolari",
+                    "movies": "Film del Momento",
+                    "tv": "Serie TV del Momento",
+                    "series": "Serie TV del Momento",
+                    "suggested": "Consigliati per Te",
+                    "recommended": "Consigliati",
+                }
+
+                for slider in sliders:
+                    if not isinstance(slider, dict):
+                        continue
+                    name = str(slider.get("name") or "").strip()
+                    # Exclude sliders dedicated to unreleased or upcoming titles
+                    if name.lower() in ("upcoming", "coming_soon", "prossimamente", "in_arrivo", "in-arrivo"):
+                        continue
+
+                    title = str(slider.get("label") or slider.get("title") or "").strip()
+                    if not title and name:
+                        title = label_translations.get(name.lower(), name.replace("_", " ").title())
+                    if not title:
+                        title = "In Evidenza"
+
+                    raw_titles = slider.get("titles") or []
+                    if not isinstance(raw_titles, list) or not raw_titles:
+                        continue
+
+                    items: list[Movie | TvSeries] = []
+                    for t in raw_titles:
+                        if not isinstance(t, dict) or not t.get("id"):
+                            continue
+                        # Exclude unreleased titles
+                        if t.get("coming_soon") is True or ("uploaded_at" in t and t.get("uploaded_at") is None):
+                            continue
+                        if t.get("type") == "tv":
+                            items.append(self._item_to_tv_series(t))
+                        else:
+                            items.append(self._item_to_movie(t))
+
+                    if items:
+                        if hero_item is None and name in ("billboard", "featured", "hero", "trending"):
+                            hero_item = items[0]
+                        parsed_carousels.append(
+                            {
+                                "id": name or f"slider_{len(parsed_carousels) + 1}",
+                                "title": title,
+                                "items": items,
+                            }
+                        )
+
+                if parsed_carousels:
+                    if hero_item is None and parsed_carousels[0]["items"]:
+                        hero_item = parsed_carousels[0]["items"][0]
+                    return hero_item, parsed_carousels
+            except Exception as err:
+                _LOGGER.debug("Could not fetch carousels from %s: %s", url, err)
+
+        return None, []
+
     async def get_latest_movies(self, page: int = 1) -> list[Movie]:
         """Fetch latest movies."""
         inertia_headers = {

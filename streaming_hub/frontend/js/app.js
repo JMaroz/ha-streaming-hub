@@ -109,6 +109,7 @@
     heroInfoBtn: document.getElementById("hero-info-btn"),
     sectionTitle: document.getElementById("section-title"),
     sectionCount: document.getElementById("section-count"),
+    catalogCarousels: document.getElementById("catalog-carousels"),
     catalogGrid: document.getElementById("catalog-grid"),
     loadingSpinner: document.getElementById("loading-spinner"),
     emptyState: document.getElementById("empty-state"),
@@ -1086,6 +1087,32 @@
     elements.sectionTitle.textContent = titleText;
 
     try {
+      if (isHome && page === 1 && !append) {
+        try {
+          const homeUrl = apiUrl(
+            `api/catalog/home?source=${state.activeSource}&profile_id=${encodeURIComponent(state.activeProfileId)}`
+          );
+          const homeResp = await fetch(homeUrl);
+          if (homeResp.ok) {
+            const homeData = await homeResp.json();
+            if (homeData.mode === "carousels" && homeData.carousels && homeData.carousels.length > 0) {
+              state.hasMore = false;
+              renderHomeCarousels(homeData.carousels);
+              if (homeData.hero) {
+                updateHero(homeData.hero);
+              } else if (homeData.carousels[0] && homeData.carousels[0].items && homeData.carousels[0].items.length > 0) {
+                updateHero(homeData.carousels[0].items[0]);
+              } else {
+                elements.heroSection.classList.add("hidden");
+              }
+              return;
+            }
+          }
+        } catch (homeErr) {
+          console.warn("Could not load home carousels, falling back to grid:", homeErr);
+        }
+      }
+
       const url = apiUrl(
         `api/catalog/latest?type=${state.activeType}&source=${state.activeSource}&page=${page}&profile_id=${encodeURIComponent(state.activeProfileId)}`
       );
@@ -1302,8 +1329,55 @@
     return card;
   }
 
+  // Render Home Thematic Carousels
+  function renderHomeCarousels(carousels) {
+    if (elements.catalogGrid) elements.catalogGrid.classList.add("hidden");
+    if (!elements.catalogCarousels) return;
+    elements.catalogCarousels.classList.remove("hidden");
+    elements.catalogCarousels.innerHTML = "";
+    elements.emptyState.classList.add("hidden");
+    elements.sectionTitle.textContent = "Home";
+    const totalTitles = (carousels || []).reduce((acc, c) => acc + (c.items ? c.items.length : 0), 0);
+    elements.sectionCount.textContent = `${(carousels || []).length} sezioni (${totalTitles} titoli)`;
+
+    const fragment = document.createDocumentFragment();
+    (carousels || []).forEach((carousel) => {
+      if (!carousel.items || carousel.items.length === 0) return;
+      const shelf = document.createElement("div");
+      shelf.className = "home-carousel-shelf carousel-shelf";
+
+      const header = document.createElement("div");
+      header.className = "home-carousel-header";
+
+      const title = document.createElement("h3");
+      title.className = "home-carousel-title";
+      title.textContent = carousel.title || "In Evidenza";
+
+      const count = document.createElement("span");
+      count.className = "home-carousel-count";
+      count.textContent = `${carousel.items.length} titoli`;
+
+      header.appendChild(title);
+      header.appendChild(count);
+      shelf.appendChild(header);
+
+      const row = document.createElement("div");
+      row.className = "home-carousel-row horizontal-scroll";
+      carousel.items.forEach((item) => {
+        row.appendChild(createCardElement(item));
+      });
+      shelf.appendChild(row);
+
+      fragment.appendChild(shelf);
+    });
+
+    elements.catalogCarousels.appendChild(fragment);
+  }
+
   // Render Grid Cards
   function renderGrid(items) {
+    if (elements.catalogCarousels) elements.catalogCarousels.classList.add("hidden");
+    if (elements.catalogGrid) elements.catalogGrid.classList.remove("hidden");
     elements.catalogGrid.innerHTML = "";
     elements.sectionCount.textContent = `${items.length} titoli`;
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import logging
+from typing import Any
 
 from ..models import Movie, ProviderSource, ResolvedMedia, TvSeason, TvSeries
 
@@ -78,6 +79,15 @@ class BaseSource(ABC):
     async def get_by_genre(self, genre: str, media_type: str = "movie", page: int = 1) -> list[Movie | TvSeries]:
         """Fetch titles matching a specific genre."""
         return []
+
+    @property
+    def has_carousels(self) -> bool:
+        """Return True if this source provides thematic/editorial homepage carousels."""
+        return False
+
+    async def get_carousels(self) -> tuple[Movie | TvSeries | None, list[dict[str, Any]]]:
+        """Fetch editorial and thematic homepage carousels if supported."""
+        return None, []
 
     async def close(self) -> None:
         """Clean up underlying network sessions and resources."""

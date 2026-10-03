@@ -2159,6 +2159,42 @@ body.cast-active {
   margin-bottom: 40px;
 }
 
+.catalog-carousels {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  width: 100%;
+  margin-bottom: 32px;
+}
+
+.home-carousel-shelf {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.home-carousel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.home-carousel-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.home-carousel-count {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+
 .horizontal-scroll {
   display: flex;
   gap: 16px;
