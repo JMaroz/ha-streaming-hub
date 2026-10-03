@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Streaming Hub</title>
+  <link rel="icon" type="image/png" href="assets/icon.png">
+  <link rel="apple-touch-icon" href="assets/icon.png">
   <link rel="stylesheet" href="css/style.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -17,11 +19,7 @@
     <header class="navbar">
       <div class="nav-container">
         <div class="brand" id="brand-logo">
-          <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="2" y="2" width="20" height="20" rx="4" />
-            <polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none" />
-            <line x1="2" y1="7" x2="22" y2="7" />
-          </svg>
+          <img src="assets/icon.png" alt="Streaming Hub" class="brand-logo-img">
           <span class="brand-title">Streaming<strong>Hub</strong></span>
         </div>
 
@@ -192,7 +190,10 @@
 
         <!-- Loading State -->
         <div id="loading-spinner" class="loading-state">
-          <div class="spinner"></div>
+          <div class="brand-loader">
+            <img src="assets/icon.png" alt="Streaming Hub" class="brand-loader-logo">
+            <div class="brand-loader-ring"></div>
+          </div>
           <p>Caricamento contenuti in corso...</p>
         </div>
 
@@ -207,7 +208,9 @@
 
         <!-- Onboarding State (No sources configured) -->
         <div id="onboarding-state" class="empty-state onboarding-card hidden">
-          <div class="onboarding-icon">📡</div>
+          <div class="onboarding-logo-wrapper">
+            <img src="assets/icon.png" alt="Streaming Hub" class="onboarding-logo">
+          </div>
           <h3>Nessuna sorgente configurata</h3>
           <p>Streaming Hub è un motore neutrale che non include link o sorgenti predefinite.<br>Per configurare le tue sorgenti, vai su <strong>Impostazioni &gt; Componenti aggiuntivi &gt; Streaming Hub &gt; Configurazione</strong> in Home Assistant e inserisci gli URL nell'elenco <code>custom_sources</code>.</p>
         </div>
@@ -491,6 +494,9 @@
     <!-- Netflix-Style Who is Watching? Modal -->
     <div id="profile-picker-modal" class="modal profile-picker-overlay hidden">
       <div class="profile-picker-container">
+        <div class="profile-picker-brand">
+          <img src="assets/icon.png" alt="Streaming Hub" class="profile-picker-logo">
+        </div>
         <h1 class="profile-picker-title">Chi sta guardando?</h1>
         <div class="profile-picker-grid" id="profile-picker-grid">
           <!-- Profiles injected dynamically -->
