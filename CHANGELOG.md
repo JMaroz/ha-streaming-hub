@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.6.0](https://github.com/JMaroz/streaming-hub-ha/compare/v2.5.1...v2.6.0) (2026-10-03)
+
+
+### Features
+
+* **catalog:** introduce home editorial carousels and hero banner revision ([3a0440b](https://github.com/JMaroz/streaming-hub-ha/commit/3a0440bd593d31a08b2ae1b3f582202040f3eb13))
+* **catalog:** preload streaming providers for visible cards and group platforms ([ea00049](https://github.com/JMaroz/streaming-hub-ha/commit/ea00049b35d693d8f74455eea26e147dbaee83e5))
+* **ui:** integrate project brand logo and unify neon cyber-cinematic theme ([06bf009](https://github.com/JMaroz/streaming-hub-ha/commit/06bf009f112cb284f18698d59d1ec4184fcc6796))
+
 ## [2.5.1](https://github.com/JMaroz/streaming-hub-ha/compare/v2.5.0...v2.5.1) (2026-10-03)
 
 
