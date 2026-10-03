@@ -1221,6 +1221,161 @@
     }
   }
 
+  // Helper to extract canonical provider logos (Zero Extra Cost Rule: only flatrate, free, ads)
+  function getDistinctProviderLogos(avail) {
+    if (!avail) return [];
+    if (avail.grouped_logos && Array.isArray(avail.grouped_logos) && avail.grouped_logos.length > 0) {
+      return avail.grouped_logos.slice(0, 4);
+    }
+    const flat = avail.flatrate || [];
+    const ads = avail.ads || [];
+    const free = avail.free || [];
+    const combined = [...flat, ...ads, ...free];
+    const seen = new Set();
+    const pLogos = [];
+
+    for (const p of combined) {
+      if (!p || (!p.logo_url && !p.logo_path)) continue;
+      const name = (p.provider_name || "").toLowerCase().trim();
+      let groupKey = name;
+      if (name.includes("amazon") || name.includes("prime video") || name.includes("freevee")) groupKey = "amazon";
+      else if (name.includes("netflix")) groupKey = "netflix";
+      else if (name.includes("disney")) groupKey = "disney";
+      else if (name.includes("apple")) groupKey = "apple";
+      else if (name.includes("paramount")) groupKey = "paramount";
+      else if (name.includes("max") || name.includes("hbo")) groupKey = "max";
+      else if (name.includes("raiplay")) groupKey = "raiplay";
+      else if (name.includes("infinity") || name.includes("mediaset")) groupKey = "mediaset";
+      else if (name.includes("timvision")) groupKey = "timvision";
+      else if (name.includes("now") || name.includes("sky go")) groupKey = "now";
+      else if (name.includes("discovery")) groupKey = "discovery";
+
+      if (!seen.has(groupKey)) {
+        seen.add(groupKey);
+        pLogos.push(p);
+      }
+    }
+    return pLogos.slice(0, 4);
+  }
+
+  function buildMiniProvidersHtml(avail) {
+    const pLogos = getDistinctProviderLogos(avail);
+    if (!pLogos || pLogos.length === 0) return "";
+    return `
+      <div class="card-provider-logos" title="Disponibile in streaming">
+        ${pLogos.map((p) => `<img class="mini-provider-logo" src="${p.logo_url || "https://image.tmdb.org/t/p/w200" + p.logo_path}" alt="${escapeHtml(p.provider_name)}" title="${escapeHtml(p.provider_name)}">`).join("")}
+      </div>
+    `;
+  }
+
+  // Pre-loading batch queue & IntersectionObserver for cards on screen
+  const pendingBatchQueue = new Map();
+  let batchEnrichTimer = null;
+  const BATCH_DEBOUNCE_MS = 150;
+  const BATCH_MAX_SIZE = 15;
+
+  const visibleCardsObserver = ("IntersectionObserver" in window)
+    ? new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            const card = entry.target;
+            visibleCardsObserver.unobserve(card);
+            queueCardForEnrichment(card);
+          }
+        });
+      }, { rootMargin: "200px 0px" })
+    : null;
+
+  function observeCardForStreamingAvailability(card, item) {
+    if (!visibleCardsObserver) return;
+    const avail = item.streaming_availability;
+    const logos = getDistinctProviderLogos(avail);
+    if (logos.length > 0) return;
+    visibleCardsObserver.observe(card);
+  }
+
+  function queueCardForEnrichment(card) {
+    const id = card.dataset.titleId;
+    if (!id) return;
+    if (!pendingBatchQueue.has(id)) {
+      pendingBatchQueue.set(id, {
+        id: id,
+        media_type: card.dataset.mediaType || "movie",
+        title: card.dataset.title || "",
+        year: parseInt(card.dataset.year) || null,
+        cards: [card],
+      });
+    } else {
+      pendingBatchQueue.get(id).cards.push(card);
+    }
+
+    if (pendingBatchQueue.size >= BATCH_MAX_SIZE) {
+      flushPendingBatchQueue();
+    } else if (!batchEnrichTimer) {
+      batchEnrichTimer = setTimeout(flushPendingBatchQueue, BATCH_DEBOUNCE_MS);
+    }
+  }
+
+  async function flushPendingBatchQueue() {
+    if (batchEnrichTimer) {
+      clearTimeout(batchEnrichTimer);
+      batchEnrichTimer = null;
+    }
+    if (pendingBatchQueue.size === 0) return;
+
+    const itemsToProcess = Array.from(pendingBatchQueue.values());
+    pendingBatchQueue.clear();
+
+    const payloadItems = itemsToProcess.map((it) => ({
+      id: it.id,
+      media_type: it.media_type,
+      title: it.title,
+      year: it.year,
+    }));
+
+    try {
+      const resp = await fetch(apiUrl("api/catalog/batch-streaming-availability"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          profile_id: state.activeProfileId || "default",
+          items: payloadItems,
+        }),
+      });
+
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const results = data.results || {};
+
+      itemsToProcess.forEach((it) => {
+        const avail = results[it.id];
+        if (!avail) return;
+
+        // Update in-memory items in catalog
+        if (state.catalogItems) {
+          const matchedItem = state.catalogItems.find((c) => c.id === it.id);
+          if (matchedItem) matchedItem.streaming_availability = avail;
+        }
+
+        const logosHtml = buildMiniProvidersHtml(avail);
+        if (logosHtml) {
+          it.cards.forEach((card) => {
+            const posterWrap = card.querySelector(".card-poster-wrap");
+            if (posterWrap && !posterWrap.querySelector(".card-provider-logos")) {
+              const temp = document.createElement("div");
+              temp.innerHTML = logosHtml;
+              const logosEl = temp.firstElementChild;
+              logosEl.classList.add("fade-in");
+              posterWrap.appendChild(logosEl);
+            }
+          });
+        }
+      });
+    } catch (err) {
+      console.warn("Failed to batch fetch streaming availability:", err);
+    }
+  }
+
   // Create Card Element
   function createCardElement(item) {
     const card = document.createElement("div");
@@ -1237,6 +1392,11 @@
     const certBadgeHtml = certInfo
       ? `<span class="card-badge-cert ${certInfo.class}">${escapeHtml(certInfo.text)}</span>`
       : "";
+
+    card.dataset.titleId = item.id;
+    card.dataset.mediaType = isTv ? "tv" : "movie";
+    card.dataset.title = item.title || "";
+    card.dataset.year = item.year || "";
 
     // Determine catalog badges
     let catalogsList = [];
@@ -1284,26 +1444,12 @@
       `;
     }
 
-    // Mini streaming provider logos overlay on card
-    let miniProvidersHtml = "";
+    // Mini streaming provider logos overlay on card (Canonical & Deduplicated)
     const avail =
       item.streaming_availability ||
       (item.watch_providers &&
         (item.watch_providers["IT"] || item.watch_providers[Object.keys(item.watch_providers)[0]]));
-    let pLogos = [];
-    if (avail) {
-      const flat = avail.flatrate || [];
-      const free = avail.free || [];
-      const combined = [...flat, ...free];
-      pLogos = combined.filter((p) => p.logo_url || p.logo_path).slice(0, 3);
-    }
-    if (pLogos.length > 0) {
-      miniProvidersHtml = `
-        <div class="card-provider-logos" title="Disponibile in streaming">
-          ${pLogos.map((p) => `<img class="mini-provider-logo" src="${p.logo_url || "https://image.tmdb.org/t/p/w200" + p.logo_path}" alt="${escapeHtml(p.provider_name)}" title="${escapeHtml(p.provider_name)}">`).join("")}
-        </div>
-      `;
-    }
+    const miniProvidersHtml = buildMiniProvidersHtml(avail);
 
     card.innerHTML = `
       <div class="card-poster-wrap">
@@ -1324,6 +1470,11 @@
         ${catalogsHtml}
       </div>
     `;
+
+    // Observe card for background pre-loading if streaming availability is not yet loaded
+    if (!miniProvidersHtml) {
+      observeCardForStreamingAvailability(card, item);
+    }
 
     card.addEventListener("click", () => openDetails(item));
     return card;
@@ -1998,7 +2149,7 @@
   function renderWatchProviders(avail) {
     if (!elements.modalWatchProviders || !elements.providersList) return;
 
-    if (!avail || (!avail.flatrate?.length && !avail.free?.length && !avail.ads?.length && !avail.rent?.length && !avail.buy?.length)) {
+    if (!avail || (!avail.grouped_providers?.length && !avail.flatrate?.length && !avail.free?.length && !avail.ads?.length && !avail.rent?.length && !avail.buy?.length)) {
       elements.modalWatchProviders.classList.add("hidden");
       return;
     }
@@ -2013,35 +2164,78 @@
 
     elements.providersList.innerHTML = "";
     const fragment = document.createDocumentFragment();
-
-    const categories = [
-      { key: "flatrate", label: "Abbonamento", badgeClass: "flatrate" },
-      { key: "free", label: "Gratuito", badgeClass: "free" },
-      { key: "ads", label: "Gratis con Pubblicità", badgeClass: "free" },
-      { key: "rent", label: "Noleggio", badgeClass: "rent" },
-      { key: "buy", label: "Acquisto", badgeClass: "buy" },
-    ];
-
     let renderedCount = 0;
 
-    categories.forEach((cat) => {
-      const providers = avail[cat.key] || [];
-      providers.forEach((p) => {
+    // 1. Consolidated Subscription / Free Streaming Platforms (with grouping)
+    if (avail.grouped_providers && avail.grouped_providers.length > 0) {
+      avail.grouped_providers.forEach((gp) => {
         renderedCount++;
         const pCard = document.createElement("div");
         pCard.className = "provider-card";
 
-        const logoSrc = p.logo_url || (p.logo_path ? `https://image.tmdb.org/t/p/w200${p.logo_path}` : "");
-        const logoHtml = logoSrc ? `<img class="provider-logo" src="${logoSrc}" alt="${escapeHtml(p.provider_name)}">` : "";
+        const logoSrc = gp.logo_url || (gp.logo_path ? `https://image.tmdb.org/t/p/w200${gp.logo_path}` : "");
+        const logoHtml = logoSrc ? `<img class="provider-logo" src="${logoSrc}" alt="${escapeHtml(gp.provider_name)}">` : "";
+
+        const badgesHtml = (gp.badges || [])
+          .map((b) => `<span class="provider-type-tag ${b.badgeClass}">${escapeHtml(b.label)}</span>`)
+          .join("");
 
         pCard.innerHTML = `
           ${logoHtml}
           <div class="provider-info">
-            <span class="provider-name">${escapeHtml(p.provider_name)}</span>
-            <span class="provider-type-tag ${cat.badgeClass}">${cat.label}</span>
+            <span class="provider-name">${escapeHtml(gp.provider_name)}</span>
+            <div class="provider-badges">${badgesHtml}</div>
           </div>
         `;
+        fragment.appendChild(pCard);
+      });
+    } else {
+      // Fallback if grouped_providers is not present
+      const subscriptionCategories = [
+        { key: "flatrate", label: "Abbonamento", badgeClass: "flatrate" },
+        { key: "free", label: "Gratuito", badgeClass: "free" },
+        { key: "ads", label: "Gratis con Pubblicità", badgeClass: "free" },
+      ];
+      subscriptionCategories.forEach((cat) => {
+        const providers = avail[cat.key] || [];
+        providers.forEach((p) => {
+          renderedCount++;
+          const pCard = document.createElement("div");
+          pCard.className = "provider-card";
+          const logoSrc = p.logo_url || (p.logo_path ? `https://image.tmdb.org/t/p/w200${p.logo_path}` : "");
+          const logoHtml = logoSrc ? `<img class="provider-logo" src="${logoSrc}" alt="${escapeHtml(p.provider_name)}">` : "";
+          pCard.innerHTML = `
+            ${logoHtml}
+            <div class="provider-info">
+              <span class="provider-name">${escapeHtml(p.provider_name)}</span>
+              <div class="provider-badges"><span class="provider-type-tag ${cat.badgeClass}">${cat.label}</span></div>
+            </div>
+          `;
+          fragment.appendChild(pCard);
+        });
+      });
+    }
 
+    // 2. Separate Pay-Per-View Section (Noleggio / Acquisto)
+    const ppvCategories = [
+      { key: "rent", label: "Noleggio", badgeClass: "rent" },
+      { key: "buy", label: "Acquisto", badgeClass: "buy" },
+    ];
+    ppvCategories.forEach((cat) => {
+      const providers = avail[cat.key] || [];
+      providers.forEach((p) => {
+        renderedCount++;
+        const pCard = document.createElement("div");
+        pCard.className = "provider-card provider-card-ppv";
+        const logoSrc = p.logo_url || (p.logo_path ? `https://image.tmdb.org/t/p/w200${p.logo_path}` : "");
+        const logoHtml = logoSrc ? `<img class="provider-logo" src="${logoSrc}" alt="${escapeHtml(p.provider_name)}">` : "";
+        pCard.innerHTML = `
+          ${logoHtml}
+          <div class="provider-info">
+            <span class="provider-name">${escapeHtml(p.provider_name)}</span>
+            <div class="provider-badges"><span class="provider-type-tag ${cat.badgeClass}">${cat.label}</span></div>
+          </div>
+        `;
         fragment.appendChild(pCard);
       });
     });

@@ -19,7 +19,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import uvicorn
 
 from .database import MediaDatabase
@@ -419,8 +419,103 @@ async def get_status(request: Request) -> dict[str, Any]:
     }
 
 
+PROVIDER_CANONICAL_GROUPS = [
+    {
+        "id": "amazon",
+        "name": "Amazon Prime Video",
+        "keywords": ("amazon", "prime video", "freevee"),
+    },
+    {
+        "id": "netflix",
+        "name": "Netflix",
+        "keywords": ("netflix",),
+    },
+    {
+        "id": "disney",
+        "name": "Disney+",
+        "keywords": ("disney",),
+    },
+    {
+        "id": "apple",
+        "name": "Apple TV+",
+        "keywords": ("apple tv", "apple"),
+    },
+    {
+        "id": "paramount",
+        "name": "Paramount+",
+        "keywords": ("paramount",),
+    },
+    {
+        "id": "max",
+        "name": "Max",
+        "keywords": ("hbo", "max"),
+    },
+    {
+        "id": "raiplay",
+        "name": "RaiPlay",
+        "keywords": ("raiplay", "rai play"),
+    },
+    {
+        "id": "mediaset",
+        "name": "Mediaset Infinity",
+        "keywords": ("mediaset", "infinity"),
+    },
+    {
+        "id": "timvision",
+        "name": "TIMVISION",
+        "keywords": ("timvision",),
+    },
+    {
+        "id": "now",
+        "name": "NOW",
+        "keywords": ("now tv", "sky go", "now"),
+    },
+    {
+        "id": "discovery",
+        "name": "Discovery+",
+        "keywords": ("discovery+", "discovery plus", "discovery"),
+    },
+    {
+        "id": "crunchyroll",
+        "name": "Crunchyroll",
+        "keywords": ("crunchyroll",),
+    },
+    {
+        "id": "pluto",
+        "name": "Pluto TV",
+        "keywords": ("pluto tv", "pluto"),
+    },
+    {
+        "id": "rakuten",
+        "name": "Rakuten TV",
+        "keywords": ("rakuten",),
+    },
+    {
+        "id": "youtube",
+        "name": "YouTube",
+        "keywords": ("youtube",),
+    },
+]
+
+
+def get_canonical_provider_group(provider_name: str) -> tuple[str, str]:
+    """Return (group_id, canonical_name) for a provider name."""
+    p_lower = (provider_name or "").lower().strip()
+    for g in PROVIDER_CANONICAL_GROUPS:
+        for kw in g["keywords"]:
+            if kw in p_lower:
+                return g["id"], g["name"]
+    clean_id = "".join(c for c in p_lower if c.isalnum())
+    return clean_id or "other", provider_name
+
+
 def extract_streaming_availability(item_dict_or_obj: Any, country_code: str) -> dict[str, Any]:
-    """Format country-specific watch providers from TMDb results."""
+    """Format country-specific watch providers from TMDb results with canonical provider grouping.
+    
+    Zero Extra Cost Rule:
+    grouped_logos and grouped_providers MUST ONLY include subscription and free streaming (flatrate, free, ads).
+    Rent and buy are strictly excluded from grouped_logos to prevent misleading users into thinking paid titles are included.
+    """
     c_code = (country_code or "IT").upper().strip()
     if isinstance(item_dict_or_obj, dict):
         raw_wp = item_dict_or_obj.get("watch_providers") or {}
@@ -450,14 +545,70 @@ def extract_streaming_availability(item_dict_or_obj: Any, country_code: str) -> 
         res.sort(key=lambda x: x["display_priority"])
         return res
 
+    flatrate = _fmt_list(c_data.get("flatrate") if isinstance(c_data, dict) else None)
+    free = _fmt_list(c_data.get("free") if isinstance(c_data, dict) else None)
+    ads = _fmt_list(c_data.get("ads") if isinstance(c_data, dict) else None)
+    rent = _fmt_list(c_data.get("rent") if isinstance(c_data, dict) else None)
+    buy = _fmt_list(c_data.get("buy") if isinstance(c_data, dict) else None)
+
+    # ZERO EXTRA COST RULE:
+    # Card streaming icons (grouped_logos) and grouped_providers MUST ONLY include
+    # subscription / free / ad-supported streaming: flatrate, free, ads.
+    # Rent and buy are completely EXCLUDED from grouped_logos and grouped_providers!
+    included_offers = [
+        (flatrate, "flatrate", "Abbonamento", "flatrate"),
+        (ads, "ads", "Gratis con Pubblicità", "free"),
+        (free, "free", "Gratuito", "free"),
+    ]
+
+    seen_groups: set[str] = set()
+    grouped_logos: list[dict[str, Any]] = []
+    grouped_map: dict[str, dict[str, Any]] = {}
+
+    for p_list, type_key, label, badge_class in included_offers:
+        for p in p_list:
+            gid, cname = get_canonical_provider_group(p["provider_name"])
+            # 1. Deduplicated mini logos for cards (max 4)
+            if gid not in seen_groups and (p.get("logo_url") or p.get("logo_path")):
+                seen_groups.add(gid)
+                grouped_logos.append(
+                    {
+                        "provider_id": p.get("provider_id"),
+                        "provider_name": cname,
+                        "group_id": gid,
+                        "logo_path": p.get("logo_path"),
+                        "logo_url": p.get("logo_url"),
+                    }
+                )
+
+            # 2. Consolidated providers for modal details
+            if gid not in grouped_map:
+                grouped_map[gid] = {
+                    "group_id": gid,
+                    "provider_name": cname,
+                    "logo_path": p.get("logo_path"),
+                    "logo_url": p.get("logo_url"),
+                    "badges": [],
+                }
+            # Add badge if not already added for this group
+            if not any(b["key"] == type_key for b in grouped_map[gid]["badges"]):
+                grouped_map[gid]["badges"].append(
+                    {"key": type_key, "label": label, "badgeClass": badge_class}
+                )
+
+    grouped_logos = grouped_logos[:4]
+    grouped_providers = list(grouped_map.values())
+
     return {
         "country": c_code,
         "link": c_data.get("link") if isinstance(c_data, dict) else None,
-        "flatrate": _fmt_list(c_data.get("flatrate") if isinstance(c_data, dict) else None),
-        "free": _fmt_list(c_data.get("free") if isinstance(c_data, dict) else None),
-        "ads": _fmt_list(c_data.get("ads") if isinstance(c_data, dict) else None),
-        "rent": _fmt_list(c_data.get("rent") if isinstance(c_data, dict) else None),
-        "buy": _fmt_list(c_data.get("buy") if isinstance(c_data, dict) else None),
+        "flatrate": flatrate,
+        "free": free,
+        "ads": ads,
+        "rent": rent,
+        "buy": buy,
+        "grouped_logos": grouped_logos,
+        "grouped_providers": grouped_providers,
     }
 
 
@@ -944,6 +1095,82 @@ async def get_title_details(
     data["age_seconds"] = 0
     data["updated_at"] = datetime.now(UTC).isoformat()
     return data
+
+
+class BatchAvailabilityItem(BaseModel):
+    id: str
+    media_type: str = "movie"
+    title: str
+    year: int | None = None
+
+
+class BatchAvailabilityRequest(BaseModel):
+    profile_id: str = "default"
+    items: list[BatchAvailabilityItem] = Field(default_factory=list)
+
+
+@app.post("/api/catalog/batch-streaming-availability")
+async def get_batch_streaming_availability(req: BatchAvailabilityRequest) -> dict[str, Any]:
+    """Retrieve streaming availability for multiple visible items, pre-fetching TMDb metadata if missing."""
+    profile = get_profile_by_id(req.profile_id)
+    active_country = (getattr(profile, "country", None) or CONFIG.get("country", "IT")).upper()
+    tmdb_key = CONFIG.get("tmdb_api_key") or metadata_enricher.tmdb_api_key
+
+    if not req.items:
+        return {"results": {}}
+
+    ids = [item.id for item in req.items]
+    cached_wp = await db.get_titles_watch_providers(ids)
+
+    missing_items = [item for item in req.items if item.id not in cached_wp]
+
+    if missing_items and tmdb_key:
+        sem = asyncio.Semaphore(5)
+
+        async def _enrich_item(it: BatchAvailabilityItem) -> None:
+            async with sem:
+                try:
+                    if it.media_type == "tv":
+                        series = TvSeries(id=it.id, title=it.title, year=it.year)
+                        await metadata_enricher.enrich_tv_series(series, api_key=tmdb_key)
+                        if series.watch_providers:
+                            cached_wp[it.id] = series.watch_providers
+                            await db.update_title_watch_providers(
+                                it.id,
+                                series.watch_providers,
+                                media_type="tv",
+                                title=it.title,
+                                year=it.year,
+                                tmdb_id=series.tmdb_id,
+                                rating=series.rating,
+                                certification=series.certification,
+                            )
+                    else:
+                        movie = Movie(id=it.id, title=it.title, year=it.year)
+                        await metadata_enricher.enrich_movie(movie, api_key=tmdb_key)
+                        if movie.watch_providers:
+                            cached_wp[it.id] = movie.watch_providers
+                            await db.update_title_watch_providers(
+                                it.id,
+                                movie.watch_providers,
+                                media_type="movie",
+                                title=it.title,
+                                year=it.year,
+                                tmdb_id=movie.tmdb_id,
+                                rating=movie.rating,
+                                certification=movie.certification,
+                            )
+                except Exception as err:
+                    _LOGGER.debug("Batch enrich TMDb failed for %s: %s", it.title, err)
+
+        await asyncio.gather(*[_enrich_item(it) for it in missing_items], return_exceptions=True)
+
+    results: dict[str, Any] = {}
+    for item in req.items:
+        wp = cached_wp.get(item.id, {})
+        results[item.id] = extract_streaming_availability({"watch_providers": wp}, active_country)
+
+    return {"results": results}
 
 
 @app.get("/api/catalog/seasons/{series_id}/{season_number}")

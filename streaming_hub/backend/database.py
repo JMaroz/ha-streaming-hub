@@ -311,6 +311,87 @@ class MediaDatabase:
         rec = self._get_title_record_sync(title_id)
         return rec["data"] if rec else None
 
+    async def get_titles_watch_providers(self, ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Retrieve cached watch_providers dict for given title IDs."""
+        async with self._lock:
+            return await asyncio.to_thread(self._get_titles_watch_providers_sync, ids)
+
+    def _get_titles_watch_providers_sync(self, ids: list[str]) -> dict[str, dict[str, Any]]:
+        if not ids:
+            return {}
+        res = {}
+        with self._get_connection() as conn:
+            chunk_size = 100
+            for i in range(0, len(ids), chunk_size):
+                chunk = ids[i : i + chunk_size]
+                placeholders = ",".join("?" * len(chunk))
+                cursor = conn.execute(
+                    f"SELECT id, watch_providers FROM titles WHERE id IN ({placeholders})",
+                    chunk,
+                )
+                for row in cursor.fetchall():
+                    raw_wp = row["watch_providers"]
+                    if raw_wp:
+                        try:
+                            wp = json.loads(raw_wp)
+                            if wp and isinstance(wp, dict):
+                                res[str(row["id"])] = wp
+                        except Exception:
+                            pass
+        return res
+
+    async def update_title_watch_providers(
+        self,
+        title_id: str,
+        watch_providers: dict[str, Any],
+        media_type: str = "movie",
+        title: str = "",
+        year: int | None = None,
+        tmdb_id: int | None = None,
+        rating: float | None = None,
+        certification: str | None = None,
+    ) -> None:
+        """Upsert title watch_providers and basic enriched metadata in SQLite."""
+        async with self._lock:
+            await asyncio.to_thread(
+                self._update_title_watch_providers_sync,
+                title_id,
+                watch_providers,
+                media_type,
+                title,
+                year,
+                tmdb_id,
+                rating,
+                certification,
+            )
+
+    def _update_title_watch_providers_sync(
+        self,
+        title_id: str,
+        watch_providers: dict[str, Any],
+        media_type: str = "movie",
+        title: str = "",
+        year: int | None = None,
+        tmdb_id: int | None = None,
+        rating: float | None = None,
+        certification: str | None = None,
+    ) -> None:
+        wp_json = json.dumps(watch_providers or {})
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO titles (id, media_type, title, year, tmdb_id, rating, certification, watch_providers, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(id) DO UPDATE SET
+                    watch_providers = excluded.watch_providers,
+                    tmdb_id = COALESCE(excluded.tmdb_id, titles.tmdb_id),
+                    rating = COALESCE(excluded.rating, titles.rating),
+                    certification = COALESCE(excluded.certification, titles.certification),
+                    updated_at = CURRENT_TIMESTAMP;
+                """,
+                (title_id, media_type, title, year, tmdb_id, rating, certification, wp_json),
+            )
+
     async def enrich_items_with_cached_metadata(self, items: list[Any]) -> None:
         """Enrich a batch of items in-place with SQLite-cached metadata."""
         if not items:

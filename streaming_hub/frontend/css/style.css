@@ -641,6 +641,22 @@ body {
   backdrop-filter: blur(4px);
   border: 1px solid rgba(255, 255, 255, 0.1);
   pointer-events: none;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.card-provider-logos.fade-in {
+  animation: fadeInLogos 0.35s ease forwards;
+}
+
+@keyframes fadeInLogos {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .mini-provider-logo {
@@ -987,6 +1003,14 @@ body {
   font-size: 0.82rem;
   font-weight: 600;
   color: var(--text-main);
+}
+
+.provider-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
 }
 
 .provider-type-tag {
